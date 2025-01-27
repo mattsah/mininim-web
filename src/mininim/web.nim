@@ -16,6 +16,7 @@ from std/httpcore import HttpCode, HttpMethod
 export
     dic,
     mummy,
+    streams,
     HttpMethod
 
 type
