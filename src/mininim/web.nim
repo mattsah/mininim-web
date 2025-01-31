@@ -29,16 +29,12 @@ type
     Middleware* = ref object of Facet
         name*: string
 
-    Route* = ref object of Facet
-        path*: string
-        methods*: seq[HttpMethod]
-
-    Serve* = ref object of Class
+    ServeCmd* = ref object of Class
         app*: App
         middleware*: seq[Middleware]
 
     MiddlewareNext* = proc(request: Request): Response {. gcsafe .}
-    MiddlewareHook* = proc(serve: Serve, request: Request, pos: int): Response {. nimcall, gcsafe .}
+    MiddlewareHook* = proc(cmd: ServeCmd, request: Request, pos: int): Response {. nimcall, gcsafe .}
 
 begin Middleware:
     method handle(request: Request, next: MiddlewareNext): Response {. base, gcsafe .} =
@@ -48,11 +44,11 @@ begin Middleware:
 
 shape Middleware: @[
     Hook(
-        call: proc(serve: Serve, request: Request, pos: int): Response =
+        call: proc(cmd: ServeCmd, request: Request, pos: int): Response =
             let
-                current = serve.app.get(Middleware)
+                current = cmd.app.get(Middleware)
 
-            if pos > serve.middleware.high:
+            if pos > cmd.middleware.high:
                 result = current.handle(
                     request,
                     proc(request: Request): Response =
@@ -67,8 +63,8 @@ shape Middleware: @[
                 result = current.handle(
                     request,
                     proc(request: Request): Response =
-                        result = cast[MiddlewareHook](serve.middleware[pos].hook)(
-                            serve,
+                        result = cast[MiddlewareHook](cmd.middleware[pos].hook)(
+                            cmd,
                             request,
                             pos + 1
                         )
@@ -79,7 +75,7 @@ shape Middleware: @[
     )
 ]
 
-begin Serve:
+begin ServeCmd:
     method init*(app: App): void {. base, mutator .} =
         this.app = app
 
@@ -91,11 +87,13 @@ begin Serve:
                 echo "Registering middleware: ", name
 
             let
-                middleware = this.app.config.findOne(Middleware, (name: name))
+                middleware = this.app.config.findAll(Middleware, (name: name))
 
-            if middleware == nil:
-                echo "here"
+            if middleware.len == 0:
                 echo "Cannot find middleware: ", name
+                quit(1)
+            elif middleware.len > 1:
+                echo "Cannot register ambiguous middleware: ", name
                 quit(1)
 
             this.middleware.add(middleware)
@@ -120,15 +118,15 @@ begin Serve:
                     )
             )
 
-        echo "Server starting on http://localhost:", port.int
+        echo "ServeCmdr starting on http://localhost:", port.int
         server.serve(port)
 
         result = 0
 
-shape Serve: @[
+shape ServeCmd: @[
     Delegate(
-        hook: proc(app: App): Serve =
-            result = Serve.init(app)
+        hook: proc(app: App): ServeCmd =
+            result = ServeCmd.init(app)
     ),
     Command(
         name: "serve",
