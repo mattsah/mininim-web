@@ -36,7 +36,7 @@ begin Middleware:
     method handle(request: Request, next: MiddlewareNext): Response {. base, gcsafe .} =
         result        = next(request)
         result.status = 200
-        result.stream = newStringStream("Hello Mininim!")
+        result.stream = newStringStream("Hello Mininim!").Stream
 
 shape Middleware: @[
     Hook(
@@ -51,7 +51,7 @@ shape Middleware: @[
                         result = (
                             status: 404,
                             headers: emptyHttpHeaders(),
-                            stream: newStringStream()
+                            stream: newStringStream().Stream
                         )
                 )
 
