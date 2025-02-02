@@ -1,15 +1,11 @@
 import
     mummy,
     mininim,
-    mininim/[
-        dic,
-        cli
-    ],
-    std/[
-        os,
-        streams,
-        strutils
-    ]
+    mininim/dic,
+    mininim/cli,
+    std/os,
+    std/streams,
+    std/strutils
 
 from std/httpcore import HttpCode, HttpMethod
 
@@ -54,7 +50,7 @@ shape Middleware: @[
                     proc(request: Request): Response =
                         result = (
                             status: 404,
-                            headers: @[],
+                            headers: emptyHttpHeaders(),
                             stream: newStringStream("")
                         )
                 )
