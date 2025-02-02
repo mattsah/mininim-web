@@ -50,7 +50,7 @@ shape Middleware: @[
                     proc(request: Request): Response =
                         result = (
                             status: 404,
-                            headers: emptyHttpHeaders(),
+                            headers: @[],
                             stream: newStringStream("")
                         )
                 )
