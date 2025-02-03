@@ -16,62 +16,30 @@ export
     HttpMethod
 
 type
-    Response* = tuple[
-        status: range[0..599],
-        headers: HttpHeaders,
-        stream: Stream
-    ]
+    Response* = object
+        status*: range[0..599]
+        stream*: Stream
+        headers*: HttpHeaders
 
     Middleware* = ref object of Facet
         name*: string
 
-    ServeCmd* = ref object of Class
+    MiddlewareNext* = proc(request: Request): Response {. gcsafe .}
+    MiddlewareHook* = proc(command: Serve, request: Request, pos: int): Response {. nimcall, gcsafe .}
+
+    Handler* = ref object of Class
+
+    Serve* = ref object of Class
         app*: App
         middleware*: seq[Middleware]
 
-    MiddlewareNext* = proc(request: Request): Response {. gcsafe .}
-    MiddlewareHook* = proc(cmd: ServeCmd, request: Request, pos: int): Response {. nimcall, gcsafe .}
-
-begin Middleware:
+begin Handler:
     method handle(request: Request, next: MiddlewareNext): Response {. base, gcsafe .} =
         result        = next(request)
         result.status = 200
-        result.stream = newStringStream("Hello Mininim!").Stream
+        result.stream = newStringStream("Hello Mininim!")
 
-shape Middleware: @[
-    Hook(
-        call: proc(cmd: ServeCmd, request: Request, pos: int): Response =
-            let
-                current = cmd.app.get(Middleware)
-
-            if pos > cmd.middleware.high:
-                result = current.handle(
-                    request,
-                    proc(request: Request): Response =
-                        result = (
-                            status: 404,
-                            headers: emptyHttpHeaders(),
-                            stream: newStringStream().Stream
-                        )
-                )
-
-            else:
-                result = current.handle(
-                    request,
-                    proc(request: Request): Response =
-                        result = cast[MiddlewareHook](cmd.middleware[pos].hook)(
-                            cmd,
-                            request,
-                            pos + 1
-                        )
-                )
-    ),
-    Middleware(
-        name: "default"
-    )
-]
-
-begin ServeCmd:
+begin Serve:
     method init*(app: App): void {. base, mutator .} =
         this.app = app
 
@@ -110,19 +78,57 @@ begin ServeCmd:
                     request.respond(
                         response.status,
                         response.headers,
-                        response.stream.readAll()
+                        (
+                            if response.stream == nil:
+                                ""
+                            else:
+                                response.stream.readAll()
+                        )
                     )
             )
 
-        echo "ServeCmdr starting on http://localhost:", port.int
+        echo "Server starting on http://localhost:", port.int
         server.serve(port)
 
         result = 0
 
-shape ServeCmd: @[
+shape Middleware: @[
+    Hook(
+        swap: Handler,
+        call: proc(command: Serve, request: Request, pos: int): Response =
+            let
+                current = command.app.get(Handler)
+
+            if pos > command.middleware.high:
+                result = current.handle(
+                    request,
+                    proc(request: Request): Response =
+                        result = Response(status: 404)
+                )
+
+            else:
+                result = current.handle(
+                    request,
+                    proc(request: Request): Response =
+                        result = cast[MiddlewareHook](command.middleware[pos].hook)(
+                            command,
+                            request,
+                            pos + 1
+                        )
+                )
+    )
+]
+
+shape Handler: @[
+    Middleware(
+        name: "default"
+    )
+]
+
+shape Serve: @[
     Delegate(
-        hook: proc(app: App): ServeCmd =
-            result = ServeCmd.init(app)
+        hook: proc(app: App): Serve =
+            result = Serve.init(app)
     ),
     Command(
         name: "serve",

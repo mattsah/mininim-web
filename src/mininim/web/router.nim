@@ -13,21 +13,24 @@ type
 
     RouteHook* = proc(app: App): Response {. nimcall, gcsafe .}
 
+    Action* = ref object of Class
+
     Router* = ref object of Class
         app*: App
         routes*: seq[Route]
 
-begin Route:
+begin Action:
     method invoke*(): Response {. base .}=
-        return (status: 0, headers: @[], stream: newStringStream(""))
+        return Response(status: 0)
 
 shape Route: @[
     Hook(
+        swap: Action,
         call: proc(app: App): Response =
             let
-                route = app.get(Route)
+                action = app.get(Action)
 
-            result = route.invoke()
+            result = action.invoke()
     )
 ]
 
