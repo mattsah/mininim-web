@@ -3,21 +3,24 @@ import
     mininim,
     mininim/dic,
     mininim/cli,
-    std/os,
     std/streams,
-    std/strutils
+    std/strutils,
+    std/os
 
-from std/httpcore import HttpCode, HttpMethod
+from std/httpcore import
+    HttpCode,
+    HttpMethod
 
 export
     dic,
     mummy,
     streams,
+    HttpCode,
     HttpMethod
 
 type
     Response* = object
-        status*: range[0..599]
+        status*: HttpCode
         stream*: Stream
         headers*: HttpHeaders
 
@@ -36,7 +39,7 @@ type
 begin Handler:
     method handle(request: Request, next: MiddlewareNext): Response {. base, gcsafe .} =
         result        = next(request)
-        result.status = 200
+        result.status = HttpCode(200)
         result.stream = newStringStream("Hello Mininim!")
 
 begin Serve:
@@ -76,7 +79,7 @@ begin Serve:
                         )
 
                     request.respond(
-                        response.status,
+                        response.status.int,
                         response.headers,
                         (
                             if response.stream == nil:
@@ -103,7 +106,7 @@ shape Middleware: @[
                 result = current.handle(
                     request,
                     proc(request: Request): Response =
-                        result = Response(status: 404)
+                        result = Response(status: HttpCode(404))
                 )
 
             else:
