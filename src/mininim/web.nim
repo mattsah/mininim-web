@@ -36,6 +36,10 @@ type
         app*: App
         middleware*: seq[Middleware]
 
+begin Request:
+    method get*(name: string, default: string = ""): string {. base .} =
+        return this.pathParams.getOrDefault(name, default)
+
 begin Handler:
     method handle(request: Request, next: MiddlewareNext): Response {. base, gcsafe .} =
         result        = next(request)

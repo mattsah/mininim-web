@@ -11,6 +11,7 @@ type
     Route* = ref object of Facet
         path*: string
         methods*: seq[HttpMethod]
+        params*: seq[string]
 
     Transformer* = ref object of Facet
         fromUrl: pointer
@@ -33,10 +34,26 @@ type
         router: Router
 
 begin RouteTree:
-    method map(segment: string): string {. base .} =
+    method map(segment: string, route: Route): string {. base .} =
         result = segment
 
-    method match(path: string, params: TableRef[string, string]): Route {. base .} =
+        var
+            parts: seq[string]
+
+        for match in segment.findAll(re"\{\w+(?:\:[^\}]+)?\}"):
+            parts = match.strip(chars = {'{', '}'}).split(':')
+
+            when defined(debug):
+                echo fmt "Parsed parameter '{parts[0]}' with pattern '{parts[1]}'"
+
+            route.params.add(parts[0])
+
+            if parts.len > 1:
+                result = result.replace(match, parts[1])
+            else:
+                result = result.replace(match, ".+")
+
+    method match(path: string, params: var seq[string]): Route {. base .} =
         let
             parts = path.split('/', 2)
 
@@ -51,29 +68,36 @@ begin RouteTree:
             for test in this.tests.keys:
                 if parts[0].match(test.re, matches):
                     child = this.tests[test]
+                    params.add(parts[0])
                     break
 
         if child == nil:
             result = nil
-        elif parts.len == 2 and parts[1].len > 0:
+        elif parts.len == 2:
             result = child.match(parts[1], params)
         else:
             result = this.route
 
     method add(path: string, route: Route): void {. base .} =
         let
-            child = RouteTree.init()
-            parts = path.split('/', 2)
-            pattern = this.map(parts[0])
+            parts   = path.split('/', 2)
+            pattern = this.map(parts[0], route)
+
+        var
+            child: RouteTree
 
         if pattern != parts[0]:
             if not this.tests.contains(pattern):
-                this.tests[pattern] = child
+                this.tests[pattern] = RouteTree.init()
+
+            child = this.tests[pattern]
         else:
             if not this.nodes.contains(parts[0]):
-                this.nodes[parts[0]] = child
+                this.nodes[parts[0]] = RouteTree.init()
 
-        if parts.len == 2 and parts[1].len > 0:
+            child = this.nodes[parts[0]]
+
+        if parts.len == 2:
             child.add(parts[1], route)
         else:
             this.route = route
@@ -119,22 +143,26 @@ begin Router:
     method add*(route: Route) {. base .} =
         this.tree.add(route.path, route)
 
-
     #[
         Implementation of the middleware handle() method, since our router is just a middleware.
     ]#
     method handle*(request: Request, next: MiddlewareNext): Response {. base .} =
-        let
-            params = newTable[string, string]()
-            match  = this.tree.match(request.path, params)
+        var
+            params: seq[string]
 
-        if match == nil:
+        let
+            route = this.tree.match(request.path, params)
+
+        if route == nil:
             result = next(request)
         else:
-            let action = cast[RouteHook](match.hook)(this.app, request)
+            let action = cast[RouteHook](route.hook)(this.app, request)
 
             action.request = request
             action.router = this
+
+            for i in 0..<params.len:
+                request.pathParams[route.params[i]] = params[i];
 
             result = action.invoke()
 
