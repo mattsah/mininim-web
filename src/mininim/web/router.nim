@@ -24,10 +24,12 @@ type
 
     RouteHook = proc(app: App, request: Request): Action {. nimcall .}
 
+    RouteList = Table[string, Route]
+
     RouteTree = ref object of Class
         nodes: Table[string, RouteTree]
         tests: Table[string, RouteTree]
-        route: Route
+        routes: RouteList
 
     Action* = ref object of Class
         request: Request
@@ -53,7 +55,7 @@ begin RouteTree:
             else:
                 result = result.replace(match, ".+")
 
-    method match(path: string, params: var seq[string]): Route {. base .} =
+    method match(path: string, verb: string, params: var seq[string]): Option[RouteList] {. base .} =
         let
             parts = path.split('/', 2)
 
@@ -72,11 +74,11 @@ begin RouteTree:
                     break
 
         if child == nil:
-            result = nil
+            result = none(RouteList)
         elif parts.len == 2:
-            result = child.match(parts[1], params)
+            result = child.match(parts[1], verb, params)
         else:
-            result = this.route
+            result = some(child.routes)
 
     method add(path: string, route: Route): void {. base .} =
         let
@@ -86,22 +88,23 @@ begin RouteTree:
         var
             child: RouteTree
 
+
         if pattern != parts[0]:
             if not this.tests.contains(pattern):
-                this.tests[pattern] = RouteTree.init()
+                this.tests[pattern] = new RouteTree
 
             child = this.tests[pattern]
         else:
             if not this.nodes.contains(parts[0]):
-                this.nodes[parts[0]] = RouteTree.init()
+                this.nodes[parts[0]] = new RouteTree
 
             child = this.nodes[parts[0]]
 
         if parts.len == 2:
             child.add(parts[1], route)
         else:
-            this.route = route
-
+            for verb in route.methods:
+                child.routes[$verb] = route
 
 begin Action:
     method invoke(): Response {. base .} =
@@ -151,20 +154,28 @@ begin Router:
             params: seq[string]
 
         let
-            route = this.tree.match(request.path, params)
+            routes = this.tree.match(request.path, request.httpMethod, params)
 
-        if route == nil:
+        if not isSome(routes):
             result = next(request)
         else:
-            let action = cast[RouteHook](route.hook)(this.app, request)
+            if get(routes).contains(request.httpMethod):
+                echo %get(routes)
+                let
+                    route  = get(routes)[request.httpMethod]
+                    action = cast[RouteHook](route.hook)(this.app, request)
 
-            action.request = request
-            action.router = this
+                action.request = request
+                action.router = this
 
-            for i in 0..<params.len:
-                request.pathParams[route.params[i]] = params[i];
+                for i in 0..<params.len:
+                    request.pathParams[route.params[i]] = params[i];
 
-            result = action.invoke()
+                result = action.invoke()
+            else:
+                result = Response(status: HttpCode(405), headers: HttpHeaders(@[
+                    ("Allowed", get(routes).keys.toSeq.join(","))
+                ]))
 
 shape Router: @[
     Shared,
