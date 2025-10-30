@@ -13,16 +13,12 @@ type
         methods*: seq[HttpMethod]
         params*: seq[string]
 
-    Transformer* = ref object of Facet
-        fromUrl: pointer
-        toUrl: pointer
-
     Router* = ref object of Class
         app: App
         tree: RouteTree
         routes: seq[Route]
 
-    RouteHook = proc(app: App, request: Request): Action {. nimcall .}
+    RouteHook = proc(router: Router, request: Request): Response {. nimcall, gcsafe .}
 
     RouteList = Table[string, Route]
 
@@ -32,8 +28,8 @@ type
         routes: RouteList
 
     Action* = ref object of Class
-        request: Request
-        router: Router
+        request*: Request
+        router*: Router
 
 begin RouteTree:
     method map(segment: string, route: Route): string {. base .} =
@@ -45,9 +41,6 @@ begin RouteTree:
         for match in segment.findAll(re"\{\w+(?:\:[^\}]+)?\}"):
             parts = match.strip(chars = {'{', '}'}).split(':')
 
-            when defined(debug):
-                echo fmt "Parsed parameter '{parts[0]}' with pattern '{parts[1]}'"
-
             route.params.add(parts[0])
 
             if parts.len > 1:
@@ -55,12 +48,12 @@ begin RouteTree:
             else:
                 result = result.replace(match, ".+")
 
-    method match(path: string, verb: string, params: var seq[string]): Option[RouteList] {. base .} =
+    method match(path: string, verb: string, params: var seq[string]): RouteList {. base .} =
+        var
+            child: RouteTree = nil
+
         let
             parts = path.split('/', 2)
-
-        var
-            child: RouteTree
 
         if this.nodes.contains(parts[0]):
             child = this.nodes[parts[0]]
@@ -73,30 +66,28 @@ begin RouteTree:
                     params.add(parts[0])
                     break
 
-        if child == nil:
-            result = none(RouteList)
-        elif parts.len == 2:
-            result = child.match(parts[1], verb, params)
-        else:
-            result = some(child.routes)
+        if child != nil:
+            if parts.len == 2:
+                result = child.match(parts[1], verb, params)
+            else:
+                result = child.routes
 
     method add(path: string, route: Route): void {. base .} =
+        var
+            child: RouteTree = nil
+
         let
             parts   = path.split('/', 2)
             pattern = this.map(parts[0], route)
 
-        var
-            child: RouteTree
-
-
         if pattern != parts[0]:
             if not this.tests.contains(pattern):
-                this.tests[pattern] = new RouteTree
+                this.tests[pattern] = RouteTree()
 
             child = this.tests[pattern]
         else:
             if not this.nodes.contains(parts[0]):
-                this.nodes[parts[0]] = new RouteTree
+                this.nodes[parts[0]] = RouteTree()
 
             child = this.nodes[parts[0]]
 
@@ -110,25 +101,17 @@ begin Action:
     method invoke(): Response {. base .} =
         return Response(status: HttpCode(500))
 
-    method request*(): Request {. base .} =
-        return this.request
-
-    method `request=`(request: Request): self {. base .} =
-        this.request = request
-        return this
-
-    method router*(): Router {. base .} =
-        return this.router
-
-    method `router=`(router: Router): self {. base .} =
-        this.router = router
-        return this
-
 shape Route: @[
     Hook(
         swap: Action,
-        call: proc(app: App, request: Request): Action =
-            return app.get(Action)
+        call: proc(router: Router, request: Request): Response =
+            let
+                action = router.app.get(Action)
+
+            action.request = request
+            action.router = router
+
+            result = action.invoke()
     )
 ]
 
@@ -143,38 +126,41 @@ begin Router:
         TODO: Parse routes and use more efficient internal data structure like a tree to make
         lookup faster.
     ]#
-    method add*(route: Route) {. base .} =
+    method add*(route: Route): void {. base .} =
         this.tree.add(route.path, route)
+
+    #[
+        Public getter for the app
+    ]#
+    method app*(): App {. base .} =
+        return this.app
 
     #[
         Implementation of the middleware handle() method, since our router is just a middleware.
     ]#
     method handle*(request: Request, next: MiddlewareNext): Response {. base .} =
         var
-            params: seq[string]
+            params: seq[string] = @[]
 
         let
             routes = this.tree.match(request.path, request.httpMethod, params)
 
-        if not isSome(routes):
+        if routes.len == 0:
             result = next(request)
         else:
-            if get(routes).contains(request.httpMethod):
+            if routes.contains(request.httpMethod):
                 let
-                    route  = get(routes)[request.httpMethod]
-                    action = cast[RouteHook](route.hook)(this.app, request)
+                    route  = routes[request.httpMethod]
 
-                action.request = request
-                action.router = this
-
-                for i in 0..<params.len:
+                for i in 0..params.high:
                     if params[i].len > 0:
                         request.pathParams[route.params[i]] = params[i];
 
-                result = action.invoke()
+                result = cast[RouteHook](route.hook)(this, request)
+
             else:
                 result = Response(status: HttpCode(405), headers: HttpHeaders(@[
-                    ("Allowed", get(routes).keys.toSeq.join(","))
+                    ("Allowed", routes.keys.toSeq.join(","))
                 ]))
 
 shape Router: @[
@@ -186,6 +172,10 @@ shape Router: @[
 
             for route in app.config.findAll(Route):
                 result.add(route)
+
+                when defined(debug):
+                    echo fmt "Registered route: {route.path}"
+
     ),
     Middleware(
         name: "router"

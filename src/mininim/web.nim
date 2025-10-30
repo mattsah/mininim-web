@@ -27,8 +27,8 @@ type
     Middleware* = ref object of Facet
         name*: string
 
-    MiddlewareNext* = proc(request: Request): Response {. gcsafe .}
-    MiddlewareHook* = proc(command: Serve, request: Request, pos: int): Response {. nimcall, gcsafe .}
+    MiddlewareNext* = proc(request: Request): Response {. closure, gcsafe .}
+    MiddlewareHook* = proc(server: Serve, request: Request, pos: int): Response {. nimcall, gcsafe .}
 
     Handler* = ref object of Class
 
@@ -74,7 +74,7 @@ begin Serve:
             port = Port(os.getEnv("WEB_SERVER_PORT", "31337").parseInt())
             server = newServer(
                 workerThreads = os.getEnv("WEB_SERVER_WORKERS", "128").parseInt(),
-                handler = proc(request: Request) =
+                handler = proc(request: Request) {. gcsafe .} =
                     let
                         response = cast[MiddlewareHook](this.middleware[0].hook)(
                             this,
@@ -102,11 +102,11 @@ begin Serve:
 shape Middleware: @[
     Hook(
         swap: Handler,
-        call: proc(command: Serve, request: Request, pos: int): Response =
+        call: proc(server: Serve, request: Request, pos: int): Response =
             let
-                current = command.app.get(Handler)
+                current = server.app.get(Handler)
 
-            if pos > command.middleware.high:
+            if pos > server.middleware.high:
                 result = current.handle(
                     request,
                     proc(request: Request): Response =
@@ -117,8 +117,8 @@ shape Middleware: @[
                 result = current.handle(
                     request,
                     proc(request: Request): Response =
-                        result = cast[MiddlewareHook](command.middleware[pos].hook)(
-                            command,
+                        result = cast[MiddlewareHook](server.middleware[pos].hook)(
+                            server,
                             request,
                             pos + 1
                         )
