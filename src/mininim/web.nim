@@ -67,7 +67,7 @@ begin Serve:
                 echo "Cannot register ambiguous middleware: ", name
                 quit(1)
 
-            this.middleware.add(middleware)
+            this.middleware.add(middleware[0])
 
     method execute(console: Console): int {. base .} =
         let

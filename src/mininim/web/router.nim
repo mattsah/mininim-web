@@ -160,7 +160,6 @@ begin Router:
             result = next(request)
         else:
             if get(routes).contains(request.httpMethod):
-                echo %get(routes)
                 let
                     route  = get(routes)[request.httpMethod]
                     action = cast[RouteHook](route.hook)(this.app, request)
@@ -178,7 +177,7 @@ begin Router:
                 ]))
 
 shape Router: @[
-    Shared,
+    Shared(),
     Delegate(
         hook: proc(app: App): Router =
             result = Router.init(app)
