@@ -168,7 +168,8 @@ begin Router:
                 action.router = this
 
                 for i in 0..<params.len:
-                    request.pathParams[route.params[i]] = params[i];
+                    if params[i].len > 0:
+                        request.pathParams[route.params[i]] = params[i];
 
                 result = action.invoke()
             else:
