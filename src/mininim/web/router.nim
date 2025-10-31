@@ -2,7 +2,7 @@ import
     mininim,
     mininim/dic,
     mininim/web,
-    std/re
+    std/nre
 
 export
     web
@@ -44,9 +44,9 @@ begin RouteTree:
             route.params.add(parts[0])
 
             if parts.len > 1:
-                result = result.replace(match, parts[1])
+                result = result.replace(match, fmt "(?P<{parts[0]}>{parts[1]})")
             else:
-                result = result.replace(match, ".+")
+                result = result.replace(match, fmt "(?P<{parts[0]}>.+)")
 
     method match(path: string, verb: string, params: var seq[string]): RouteList {. base .} =
         var
@@ -58,12 +58,16 @@ begin RouteTree:
         if this.nodes.contains(parts[0]):
             child = this.nodes[parts[0]]
         else:
-            var matches: seq[string] = @[];
-
             for test in this.tests.keys:
-                if parts[0].match(test.re, matches):
+                let
+                    matches = parts[0].match(test.re)
+
+                if isSome matches:
                     child = this.tests[test]
-                    params.add(parts[0])
+
+                    for item in get(matches).captures.toSeq:
+                        params.add(get(item))
+
                     break
 
         if child != nil:
@@ -113,6 +117,7 @@ shape Route: @[
 
             result = action.invoke()
     )
+
 ]
 
 begin Router:
