@@ -28,11 +28,11 @@ type
         name*: string
 
     MiddlewareNext* = proc(request: Request): Response {. closure, gcsafe .}
-    MiddlewareHook* = proc(server: Serve, request: Request, pos: int): Response {. nimcall, gcsafe .}
+    MiddlewareHook* = proc(HttpServer: HttpServer, request: Request, pos: int): Response {. nimcall, gcsafe .}
 
     Handler* = ref object of Class
 
-    Serve* = ref object of Class
+    HttpServer* = ref object of Class
         app*: App
         middleware*: seq[Middleware]
 
@@ -49,7 +49,7 @@ begin Handler:
         result.status = HttpCode(200)
         result.stream = newStringStream("Hello Mininim!")
 
-begin Serve:
+begin HttpServer:
     method init*(app: App): void {. base, mutator .} =
         this.app = app
 
@@ -72,7 +72,7 @@ begin Serve:
 
             this.middleware.add(middleware[0])
 
-    method execute(console: Console): int {. base .} =
+    method run*(): int {. base .} =
         let
             port = Port(os.getEnv("WEB_SERVER_PORT", "31337").parseInt())
             server = newServer(
@@ -102,10 +102,13 @@ begin Serve:
 
         result = 0
 
+    method execute(console: Console): int {. base .} =
+        result = this.run()
+
 shape Middleware: @[
     Hook(
         swap: Handler,
-        call: proc(server: Serve, request: Request, pos: int): Response =
+        call: proc(server: HttpServer, request: Request, pos: int): Response =
             let
                 current = server.app.get(Handler)
 
@@ -135,13 +138,13 @@ shape Handler: @[
     )
 ]
 
-shape Serve: @[
+shape HttpServer: @[
     Delegate(
-        hook: proc(app: App): Serve =
-            result = Serve.init(app)
+        hook: proc(app: App): HttpServer =
+            result = HttpServer.init(app)
     ),
     Command(
         name: "serve",
-        description: "Start the HTTP server"
+        description: "Start the HTTP Server"
     )
 ]
