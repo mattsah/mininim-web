@@ -32,7 +32,7 @@ type
         router*: Router
 
 begin RouteTree:
-    method map(segment: string, route: Route): string {. base .} =
+    method map(segment: string): string {. base .} =
         result = segment
 
         var
@@ -41,65 +41,72 @@ begin RouteTree:
         for match in segment.findAll(re"\{\w+(?:\:[^\}]+)?\}"):
             parts = match.strip(chars = {'{', '}'}).split(':')
 
-            route.params.add(parts[0])
-
             if parts.len > 1:
                 result = result.replace(match, fmt "(?P<{parts[0]}>{parts[1]})")
             else:
                 result = result.replace(match, fmt "(?P<{parts[0]}>.+)")
 
-    method match(path: string, verb: string, params: var seq[string]): RouteList {. base .} =
+    method match(request: Request): Route {. base .} =
         var
-            child: RouteTree = nil
+            branch: RouteTree = this
+            found: bool
 
-        let
-            parts = path.split('/', 2)
+        for segment in request.path.split('/'):
+            found = false
 
-        if this.nodes.contains(parts[0]):
-            child = this.nodes[parts[0]]
-        else:
-            for test in this.tests.keys:
-                let
-                    matches = parts[0].match(test.re)
-
-                if isSome matches:
-                    child = this.tests[test]
-
-                    for item in get(matches).captures.toSeq:
-                        params.add(get(item))
-
-                    break
-
-        if child != nil:
-            if parts.len == 2:
-                result = child.match(parts[1], verb, params)
+            if branch.nodes.contains(segment):
+                found = true
+                branch = branch.nodes[segment]
             else:
-                result = child.routes
+                for test in branch.tests.keys:
+                    let
+                        matches = segment.match(test.re)
 
-    method add(path: string, route: Route): void {. base .} =
+                    if isSome matches:
+                        found = true
+                        branch = branch.tests[test]
+
+                        for name, value in get(matches).captures.toTable:
+                            request.pathParams[name] = value
+
+                        break
+
+            if not found:
+                return
+
+        if branch.routes.contains(request.httpMethod):
+            result = branch.routes[request.httpMethod]
+        else:
+            request.headers["Allow"] = branch.routes.keys.toSeq.join(", ")
+
+            result = Route(
+                hook: proc(router: Router, request: Request): Response {. nimcall, gcsafe .} =
+                    return Response(status: HttpCode(405), headers: HttpHeaders(@[
+                        ("Allow", request.headers["Allow"])
+                    ]))
+            )
+
+    method add(route: Route): void {. base .} =
         var
-            child: RouteTree = nil
+            branch: RouteTree = this
 
-        let
-            parts   = path.split('/', 2)
-            pattern = this.map(parts[0], route)
+        for segment in route.path.split('/'):
+            let
+                pattern = this.map(segment)
 
-        if pattern != parts[0]:
-            if not this.tests.contains(pattern):
-                this.tests[pattern] = RouteTree()
+            if pattern != segment:
+                if not branch.tests.contains(pattern):
+                    branch.tests[pattern] = RouteTree()
 
-            child = this.tests[pattern]
-        else:
-            if not this.nodes.contains(parts[0]):
-                this.nodes[parts[0]] = RouteTree()
+                branch = branch.tests[pattern]
+            else:
+                if not branch.nodes.contains(segment):
+                    branch.nodes[segment] = RouteTree()
 
-            child = this.nodes[parts[0]]
+                branch = branch.nodes[segment]
 
-        if parts.len == 2:
-            child.add(parts[1], route)
-        else:
-            for verb in route.methods:
-                child.routes[$verb] = route
+        for verb in route.methods:
+            branch.routes[$verb] = route
 
 begin Action:
     method invoke(): Response {. base .} =
@@ -132,7 +139,7 @@ begin Router:
         lookup faster.
     ]#
     method add*(route: Route): void {. base .} =
-        this.tree.add(route.path, route)
+        this.tree.add(route)
 
     #[
         Public getter for the app
@@ -144,29 +151,13 @@ begin Router:
         Implementation of the middleware handle() method, since our router is just a middleware.
     ]#
     method handle*(request: Request, next: MiddlewareNext): Response {. base .} =
-        var
-            params: seq[string] = @[]
-
         let
-            routes = this.tree.match(request.path, request.httpMethod, params)
+            route = this.tree.match(request)
 
-        if routes.len == 0:
+        if route == nil:
             result = next(request)
         else:
-            if routes.contains(request.httpMethod):
-                let
-                    route  = routes[request.httpMethod]
-
-                for i in 0..params.high:
-                    if params[i].len > 0:
-                        request.pathParams[route.params[i]] = params[i];
-
-                result = cast[RouteHook](route.hook)(this, request)
-
-            else:
-                result = Response(status: HttpCode(405), headers: HttpHeaders(@[
-                    ("Allowed", routes.keys.toSeq.join(","))
-                ]))
+            result = cast[RouteHook](route.hook)(this, request)
 
 shape Router: @[
     Shared(),
