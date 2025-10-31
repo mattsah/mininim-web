@@ -38,7 +38,10 @@ type
 
 begin Request:
     method get*(name: string, default: string = ""): string {. base .} =
-        return this.pathParams.getOrDefault(name, default)
+        let
+            value = this.pathParams.getOrDefault(name, default)
+
+        result = if value != "": value else: default
 
 begin Handler:
     method handle(request: Request, next: MiddlewareNext): Response {. base, gcsafe .} =
