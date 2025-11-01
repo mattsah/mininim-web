@@ -80,7 +80,7 @@ begin RouteTree:
             request.headers["Allow"] = branch.routes.keys.toSeq.join(", ")
 
             result = Route(
-                hook: proc(router: Router, request: Request): Response {. nimcall, gcsafe .} =
+                call: proc(router: Router, request: Request): Response {. nimcall, gcsafe .} =
                     return Response(status: HttpCode(405), headers: HttpHeaders(@[
                         ("Allow", request.headers["Allow"])
                     ]))
@@ -114,8 +114,7 @@ begin Action:
 
 shape Route: @[
     Hook(
-        base: Action,
-        hook: proc(router: Router, request: Request): Response =
+        call: proc(router: Router, request: Request): Response =
             let
                 action = router.app.get(self)
 
@@ -157,12 +156,12 @@ begin Router:
         if route == nil:
             result = next(request)
         else:
-            result = cast[RouteHook](route.hook)(this, request)
+            result = cast[RouteHook](route.call)(this, request)
 
 shape Router: @[
     Shared(),
     Delegate(
-        hook: proc(app: App): self =
+        call: proc(app: App): self =
             result = self.init(app)
             result.tree = RouteTree.init()
 

@@ -57,8 +57,7 @@ shape Handler: @[
 
 shape Middleware: @[
     Hook(
-        base: Handler,
-        hook: proc(server: HttpServer, request: Request, pos: int): Response =
+        call: proc(server: HttpServer, request: Request, pos: int): Response =
             let
                 current = server.app.get(self)
 
@@ -73,7 +72,7 @@ shape Middleware: @[
                 result = current.handle(
                     request,
                     proc(request: Request): Response =
-                        result = cast[MiddlewareHook](server.middleware[pos].hook)(
+                        result = cast[MiddlewareHook](server.middleware[pos].call)(
                             server,
                             request,
                             pos + 1
@@ -112,7 +111,7 @@ begin HttpServer:
                 workerThreads = os.getEnv("WEB_SERVER_WORKERS", "128").parseInt(),
                 handler = proc(request: Request) {. gcsafe .} =
                     let
-                        response = cast[MiddlewareHook](this.middleware[0].hook)(
+                        response = cast[MiddlewareHook](this.middleware[0].call)(
                             this,
                             request,
                             1
@@ -140,7 +139,7 @@ begin HttpServer:
 
 shape HttpServer: @[
     Delegate(
-        hook: proc(app: App): self =
+        call: proc(app: App): self =
             result = self.init(app)
     ),
     Command(
