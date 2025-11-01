@@ -19,10 +19,7 @@ export
     HttpMethod
 
 type
-    Response* = object
-        status*: HttpCode
-        stream*: Stream
-        headers*: HttpHeaders
+    Handler* = ref object of Class
 
     Middleware* = ref object of Facet
         name*: string
@@ -30,11 +27,14 @@ type
     MiddlewareNext* = proc(request: Request): Response {. closure, gcsafe .}
     MiddlewareHook* = proc(HttpServer: HttpServer, request: Request, pos: int): Response {. nimcall, gcsafe .}
 
-    Handler* = ref object of Class
-
     HttpServer* = ref object of Class
         app*: App
         middleware*: seq[Middleware]
+
+    Response* = object
+        status*: HttpCode
+        stream*: Stream
+        headers*: HttpHeaders
 
 begin Request:
     method get*(name: string, default: string = ""): string {. base .} =
@@ -48,6 +48,39 @@ begin Handler:
         result        = next(request)
         result.status = HttpCode(200)
         result.stream = newStringStream("Hello Mininim!")
+
+shape Handler: @[
+    Middleware(
+        name: "default"
+    )
+]
+
+shape Middleware: @[
+    Hook(
+        base: Handler,
+        hook: proc(server: HttpServer, request: Request, pos: int): Response =
+            let
+                current = server.app.get(self)
+
+            if pos > server.middleware.high:
+                result = current.handle(
+                    request,
+                    proc(request: Request): Response =
+                        result = Response(status: HttpCode(404))
+                )
+
+            else:
+                result = current.handle(
+                    request,
+                    proc(request: Request): Response =
+                        result = cast[MiddlewareHook](server.middleware[pos].hook)(
+                            server,
+                            request,
+                            pos + 1
+                        )
+                )
+    )
+]
 
 begin HttpServer:
     method init*(app: App): void {. base, mutator .} =
@@ -105,43 +138,10 @@ begin HttpServer:
     method execute(console: Console): int {. base .} =
         result = this.run()
 
-shape Middleware: @[
-    Hook(
-        swap: Handler,
-        call: proc(server: HttpServer, request: Request, pos: int): Response =
-            let
-                current = server.app.get(Handler)
-
-            if pos > server.middleware.high:
-                result = current.handle(
-                    request,
-                    proc(request: Request): Response =
-                        result = Response(status: HttpCode(404))
-                )
-
-            else:
-                result = current.handle(
-                    request,
-                    proc(request: Request): Response =
-                        result = cast[MiddlewareHook](server.middleware[pos].hook)(
-                            server,
-                            request,
-                            pos + 1
-                        )
-                )
-    )
-]
-
-shape Handler: @[
-    Middleware(
-        name: "default"
-    )
-]
-
 shape HttpServer: @[
     Delegate(
-        hook: proc(app: App): HttpServer =
-            result = HttpServer.init(app)
+        hook: proc(app: App): self =
+            result = self.init(app)
     ),
     Command(
         name: "serve",

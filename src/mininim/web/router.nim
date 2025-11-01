@@ -114,10 +114,10 @@ begin Action:
 
 shape Route: @[
     Hook(
-        swap: Action,
-        call: proc(router: Router, request: Request): Response =
+        base: Action,
+        hook: proc(router: Router, request: Request): Response =
             let
-                action = router.app.get(Action)
+                action = router.app.get(self)
 
             action.request = request
             action.router = router
@@ -162,8 +162,8 @@ begin Router:
 shape Router: @[
     Shared(),
     Delegate(
-        hook: proc(app: App): Router =
-            result = Router.init(app)
+        hook: proc(app: App): self =
+            result = self.init(app)
             result.tree = RouteTree.init()
 
             for route in app.config.findAll(Route):
