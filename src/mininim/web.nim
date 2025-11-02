@@ -111,7 +111,7 @@ begin HttpServer:
                 workerThreads = os.getEnv("WEB_SERVER_WORKERS", "128").parseInt(),
                 handler = proc(request: Request) {. gcsafe .} =
                     let
-                        response = cast[MiddlewareHook](this.middleware[0].call)(
+                        response = this.middleware[0][MiddlewareHook](
                             this,
                             request,
                             1

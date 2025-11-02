@@ -129,6 +129,7 @@ shape Route: @[
 begin Router:
     method init*(app: App) {. base, mutator .} =
         this.app = app
+        this.tree = RouteTree.init()
 
     #[
         Adds a route to the router.  This is usually called when the Router is constructed
@@ -156,14 +157,13 @@ begin Router:
         if route == nil:
             result = next(request)
         else:
-            result = cast[RouteHook](route.call)(this, request)
+            result = route[RouteHook](this, request)
 
 shape Router: @[
     Shared(),
     Delegate(
         call: proc(app: App): self =
             result = self.init(app)
-            result.tree = RouteTree.init()
 
             for route in app.config.findAll(Route):
                 result.add(route)
