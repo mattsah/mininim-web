@@ -59,7 +59,7 @@ shape Middleware: @[
     Hook(
         call: proc(server: HttpServer, request: Request, pos: int): Response {. closure .}=
             let
-                current = this.app.get(self)
+                current = this.app.get(shape)
 
             if pos > server.middleware.high:
                 result = current.handle(
@@ -139,8 +139,8 @@ begin HttpServer:
 
 shape HttpServer: @[
     Delegate(
-        call: proc(): self {. closure .}=
-            result = self.init(this.app)
+        call: proc(): shape {. closure .}=
+            result = shape.init(this.app)
     ),
     Command(
         name: "serve",

@@ -119,7 +119,7 @@ shape Route: @[
     Hook(
         call: proc(router: Router, request: Request): Response {. closure .} =
             let
-                action = this.app.get(self)
+                action = this.app.get(shape)
 
             action.request = request
             action.router = router
@@ -158,8 +158,8 @@ begin Router:
 shape Router: @[
     Shared(),
     Delegate(
-        call: proc(): self {. closure .} =
-            result = self.init()
+        call: proc(): shape {. closure .} =
+            result = shape.init()
 
             for route in this.app.config.findAll(Route):
                 result.add(route)
