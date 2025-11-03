@@ -25,7 +25,7 @@ type
         name*: string
 
     MiddlewareNext* = proc(request: Request): Response {. closure, gcsafe .}
-    MiddlewareHook* = proc(HttpServer: HttpServer, request: Request, pos: int): Response {. nimcall, gcsafe .}
+    MiddlewareHook* = proc(HttpServer: HttpServer, request: Request, pos: int): Response {. closure, gcsafe .}
 
     HttpServer* = ref object of Class
         app*: App
@@ -57,9 +57,9 @@ shape Handler: @[
 
 shape Middleware: @[
     Hook(
-        call: proc(server: HttpServer, request: Request, pos: int): Response =
+        call: proc(server: HttpServer, request: Request, pos: int): Response {. closure .}=
             let
-                current = server.app.get(self)
+                current = this.app.get(self)
 
             if pos > server.middleware.high:
                 result = current.handle(
@@ -72,7 +72,7 @@ shape Middleware: @[
                 result = current.handle(
                     request,
                     proc(request: Request): Response =
-                        result = cast[MiddlewareHook](server.middleware[pos].call)(
+                        result = MiddlewareHook.value(server.middleware[pos].call)(
                             server,
                             request,
                             pos + 1
@@ -111,7 +111,7 @@ begin HttpServer:
                 workerThreads = os.getEnv("WEB_SERVER_WORKERS", "128").parseInt(),
                 handler = proc(request: Request) {. gcsafe .} =
                     let
-                        response = this.middleware[0][MiddlewareHook](
+                        response = MiddlewareHook.value(this.middleware[0].call)(
                             this,
                             request,
                             1
@@ -139,8 +139,8 @@ begin HttpServer:
 
 shape HttpServer: @[
     Delegate(
-        call: proc(app: App): self =
-            result = self.init(app)
+        call: proc(): self {. closure .}=
+            result = self.init(this.app)
     ),
     Command(
         name: "serve",

@@ -18,7 +18,7 @@ type
         tree: RouteTree
         routes: seq[Route]
 
-    RouteHook = proc(router: Router, request: Request): Response {. nimcall, gcsafe .}
+    RouteHook = proc(router: Router, request: Request): Response {. closure .}
 
     RouteList = Table[string, Route]
 
@@ -79,11 +79,14 @@ begin RouteTree:
         else:
             request.headers["Allow"] = branch.routes.keys.toSeq.join(", ")
 
-            result = Route(
-                call: proc(router: Router, request: Request): Response {. nimcall, gcsafe .} =
+            var
+                call = proc(router: Router, request: Request): Response =
                     return Response(status: HttpCode(405), headers: HttpHeaders(@[
                         ("Allow", request.headers["Allow"])
                     ]))
+
+            result = Route(
+                call: Closure.trap(call)
             )
 
     method add(route: Route): void {. base .} =
@@ -114,7 +117,7 @@ begin Action:
 
 shape Route: @[
     Hook(
-        call: proc(router: Router, request: Request): Response =
+        call: proc(router: Router, request: Request): Response {. closure .} =
             let
                 action = router.app.get(self)
 
@@ -162,10 +165,10 @@ begin Router:
 shape Router: @[
     Shared(),
     Delegate(
-        call: proc(app: App): self =
-            result = self.init(app)
+        call: proc(): self {. closure .} =
+            result = self.init(this.app)
 
-            for route in app.config.findAll(Route):
+            for route in this.app.config.findAll(Route):
                 result.add(route)
 
                 when defined(debug):
