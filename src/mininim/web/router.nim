@@ -119,7 +119,7 @@ shape Route: @[
     Hook(
         call: proc(router: Router, request: Request): Response {. closure .} =
             let
-                action = router.app.get(self)
+                action = this.app.get(self)
 
             action.request = request
             action.router = router
@@ -130,8 +130,7 @@ shape Route: @[
 ]
 
 begin Router:
-    method init*(app: App) {. base, mutator .} =
-        this.app = app
+    method init*() {. base, mutator .} =
         this.tree = RouteTree.init()
 
     #[
@@ -143,12 +142,6 @@ begin Router:
     ]#
     method add*(route: Route): void {. base .} =
         this.tree.add(route)
-
-    #[
-        Public getter for the app
-    ]#
-    method app*(): App {. base .} =
-        return this.app
 
     #[
         Implementation of the middleware handle() method, since our router is just a middleware.
@@ -166,7 +159,7 @@ shape Router: @[
     Shared(),
     Delegate(
         call: proc(): self {. closure .} =
-            result = self.init(this.app)
+            result = self.init()
 
             for route in this.app.config.findAll(Route):
                 result.add(route)
