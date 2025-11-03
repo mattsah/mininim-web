@@ -165,7 +165,7 @@ shape Router: @[
                 result.add(route)
 
                 when defined(debug):
-                    echo fmt "Registered route: {route.path}"
+                    echo fmt "message[{align($this.scope, 3, '0')}] registered route: {route.path}"
 
     ),
     Middleware(

@@ -23,12 +23,12 @@ type
 
     Middleware* = ref object of Facet
         name*: string
+        priority*: int
 
     MiddlewareNext* = proc(request: Request): Response {. closure, gcsafe .}
     MiddlewareHook* = proc(HttpServer: HttpServer, request: Request, pos: int): Response {. closure, gcsafe .}
 
     HttpServer* = ref object of Class
-        app*: App
         middleware*: seq[Middleware]
 
     Response* = object
@@ -82,28 +82,6 @@ shape Middleware: @[
 ]
 
 begin HttpServer:
-    method init*(app: App): void {. base, mutator .} =
-        this.app = app
-
-        let
-            middleware_names = os.getEnv("WEB_SERVER_MIDDLEWARE", "default").strip().split(',')
-
-        for name in middleware_names:
-            when defined(debug):
-                echo "Registering middleware: ", name
-
-            let
-                middleware = this.app.config.findAll(Middleware, (name: name))
-
-            if middleware.len == 0:
-                echo "Cannot find middleware: ", name
-                quit(1)
-            elif middleware.len > 1:
-                echo "Cannot register ambiguous middleware: ", name
-                quit(1)
-
-            this.middleware.add(middleware[0])
-
     method run*(): int {. base .} =
         let
             port = Port(os.getEnv("WEB_SERVER_PORT", "31337").parseInt())
@@ -129,19 +107,36 @@ begin HttpServer:
                     )
             )
 
-        echo "Server starting on http://localhost:", port.int
+        echo fmt "message[{align($this.type, 3, '0')}]: starting server on http://localhost:{port.int}"
         server.serve(port)
 
         result = 0
+
+    proc build(app: App): self {. static .} =
+        result = self.init()
+
+        let
+            middlewares = app.config.findAll(Middleware)
+
+        if middlewares.len == 0:
+            let
+                default = app.config.findAll(Middleware, (scope: Handler.typeID))
+
+            result.middleware.add(default)
+
+        else:
+            for middleware in middlewares:
+                if middleware.scope != Handler.typeID:
+                    result.middleware.add(middleware)
+
+                when defined(debug):
+                    echo fmt "message[{align($middleware.class, 3, '0')}] registered middleware {middleware.name}"
 
     method execute(console: Console): int {. base .} =
         result = this.run()
 
 shape HttpServer: @[
-    Delegate(
-        call: proc(): shape {. closure .}=
-            result = shape.init(this.app)
-    ),
+    Delegate(),
     Command(
         name: "serve",
         description: "Start the HTTP Server"
