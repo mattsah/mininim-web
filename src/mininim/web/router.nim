@@ -112,7 +112,7 @@ begin RouteTree:
             branch.routes[$verb] = route
 
 begin Action:
-    method invoke(): Response {. base .} =
+    method invoke*(): Response {. base .} =
         return Response(status: HttpCode(500))
 
 shape Route: @[
@@ -130,7 +130,7 @@ shape Route: @[
 ]
 
 begin Router:
-    method init*() {. base, mutator .} =
+    method init*() {. base .} =
         this.tree = RouteTree.init()
 
     #[
