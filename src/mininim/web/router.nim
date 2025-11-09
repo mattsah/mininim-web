@@ -5,6 +5,7 @@ import
     std/nre
 
 export
+    dic,
     web
 
 type
