@@ -19,7 +19,7 @@ type
         tree: RouteTree
         routes: seq[Route]
 
-    RouteHook = proc(router: Router, request: Request): Response {. closure .}
+    RouteHook* = proc(router: Router, request: Request): Response {. closure .}
 
     RouteList = Table[string, Route]
 
@@ -79,15 +79,14 @@ begin RouteTree:
             result = branch.routes[request.httpMethod]
         else:
             request.headers["Allow"] = branch.routes.keys.toSeq.join(", ")
-
-            var
-                call = proc(router: Router, request: Request): Response =
-                    return Response(status: HttpCode(405), headers: HttpHeaders(@[
-                        ("Allow", request.headers["Allow"])
-                    ]))
-
             result = Route(
-                call: Closure.trap(call)
+                call: proc(router: Router, request: Request): Response =
+                    return Response(
+                        status: HttpCode(405),
+                        headers: HttpHeaders(@[
+                            ("Allow", request.headers["Allow"])
+                        ])
+                    )
             )
 
     method add(route: Route): void {. base .} =

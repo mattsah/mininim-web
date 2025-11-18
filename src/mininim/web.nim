@@ -61,7 +61,7 @@ shape Middleware: @[
                     if pos > server.middleware.high:
                         result = Response(status: HttpCode(404))
                     else:
-                        result = MiddlewareHook.value(server.middleware[pos].call)(
+                        result = server.middleware[pos][MiddlewareHook](
                             server,
                             request,
                             pos + 1
@@ -91,7 +91,7 @@ begin HttpServer:
                 workerThreads = os.getEnv("WEB_SERVER_WORKERS", "128").parseInt(),
                 handler = proc(request: Request) {. gcsafe .} =
                     let
-                        response = MiddlewareHook.value(this.middleware[0].call)(
+                        response = this.middleware[0][MiddlewareHook](
                             this,
                             request,
                             1 # There is always at least one middleware, so we start this at 1
