@@ -12,9 +12,6 @@ export
     xmltree
 
 type
-    ElementHook* = proc(tmpl: XmlTemplate, head: XmlNode, node: XmlNode, parent: XmlNode): void {. closure .}
-    AttrFilterHook* = proc(tmpl: XmlTemplate, value: dyn): dyn {. closure .}
-
     XmlMode* = enum
         XmlRaw
         XmlEsc
@@ -27,15 +24,19 @@ type
         tree: XmlNode = newXmlTree("x", [])
         engine*: XmlEngine
 
-    XmlEngine* = ref object of Class
-        elements: Table[string, ElementHook]
-        attrfilters: Table[string, AttrFilterHook]
+    ElementHook* = proc(tmpl: XmlTemplate, head: XmlNode, node: XmlNode, parent: XmlNode): void
 
     XmlElement* = ref object of Facet
         name*: string
 
+    AttrFilterHook* = proc(tmpl: XmlTemplate, value: dyn): dyn
+
     XmlAttrFilter* = ref object of Facet
         name*: string
+
+    XmlEngine* = ref object of Class
+        elements: Table[string, ElementHook]
+        attrfilters: Table[string, AttrFilterHook]
 
 begin XmlNode:
     method delete*(child: XmlNode): void {. base .} =
@@ -288,131 +289,156 @@ begin XmlTemplate:
 
 shape XmlEngine: @[
     Delegate(
-        call: proc(): shape {. closure .} =
-            result = shape.init()
+        call: DelegateHook as (
+            block:
+                result = shape.init()
 
-            for element in this.app.config.findAll(XmlElement):
-                result.withElement(element.name, element[ElementHook])
+                for element in this.app.config.findAll(XmlElement):
+                    result.withElement(element.name, element[ElementHook])
 
-            for filter in this.app.config.findAll(XmlAttrFilter):
-                result.withAttrFilter(filter.name, filter[AttrFilterHook])
+                for filter in this.app.config.findAll(XmlAttrFilter):
+                    result.withAttrFilter(filter.name, filter[AttrFilterHook])
 
+        )
     ),
     XmlAttrFilter(
         name: "val",
-        call: proc(tmpl: XmlTemplate, value: dyn): dyn {.closure .} =
-            result = tmpl.eval(value)
+        call: AttrFilterHook as (
+            block:
+                result = tmpl.eval(value)
+        )
     ),
     XmlAttrFilter(
         name: "raw",
-        call: proc(tmpl: XmlTemplate, value: dyn): dyn {.closure .} =
-            result = value
+        call: AttrFilterHook as (
+            block:
+                result = value
+        )
     ),
     XmlElement(
         name: "script",
-        call: proc(tmpl: XmlTemplate, head: XmlNode, node: XmlNode, parent: XmlNode): void {.closure .} =
-            tmpl.beginMode(XmlSec)
-            let
-                script = tmpl.clone(node)
-            for child in node:
-                tmpl.add(script, child, parent)
-            head.add(script)
-            tmpl.closeMode()
+        call: ElementHook as (
+            block:
+                tmpl.beginMode(XmlSec)
+
+                let
+                    script = tmpl.clone(node)
+
+
+                for child in node:
+                    tmpl.add(script, child, parent)
+
+                tmpl.closeMode()
+                head.add(script)
+        )
     ),
     XmlElement(
         name: "raw",
-        call: proc(tmpl: XmlTemplate, head: XmlNode, node: XmlNode, parent: XmlNode): void {.closure .} =
-            for child in node:
-                let
-                    plate = tmpl.engine.load(tmpl.fill($child))
-                    tree = plate.process((), XmlRaw)
+        call: ElementHook as (
+            block:
+                for child in node:
+                    let
+                        plate = tmpl.engine.load(tmpl.fill($child))
+                        tree = plate.process((), XmlRaw)
 
-                for subchild in tree:
-                    head.add(subchild)
+                    for subchild in tree:
+                        head.add(subchild)
+        )
     ),
     XmlElement(
         name: "mix",
-        call: proc(tmpl: XmlTemplate, head: XmlNode, node: XmlNode, parent: XmlNode): void {.closure .} =
-            for child in node:
-                let
-                    plate = tmpl.engine.load(tmpl.fill($child))
-                    tree = plate.process(copy tmpl.scope)
+        call: ElementHook as (
+            block:
+                for child in node:
+                    let
+                        plate = tmpl.engine.load(tmpl.fill($child))
+                        tree = plate.process(copy tmpl.scope)
 
-                for subchild in tree:
-                    head.add(subchild)
+                    for subchild in tree:
+                        head.add(subchild)
+        )
     ),
     XmlElement(
         name: "set",
-        call: proc(tmpl: XmlTemplate, head: XmlNode, node: XmlNode, parent: XmlNode): void {.closure .} =
-            for key, value in tmpl.getAttrs(node):
-                tmpl.set(key, value)
+        call: ElementHook as (
+            block:
+                for key, value in tmpl.getAttrs(node):
+                    tmpl.set(key, value)
+        )
     ),
     XmlElement(
         name: "val",
-        call: proc(tmpl: XmlTemplate, head: XmlNode, node: XmlNode, parent: XmlNode): void {.closure .} =
-            let
-                attrs  = tmpl.getAttrs(node, @["name"])
-            if not attrs.hasKey("name"):
-                raise newException(ValueError, "The `val` tag must provide a `name` attribute")
+        call: ElementHook as (
+            block:
+                let
+                    attrs  = tmpl.getAttrs(node, @["name"])
+                if not attrs.hasKey("name"):
+                    raise newException(ValueError, "The `val` tag must provide a `name` attribute")
 
-            tmpl.put(attrs["name"], node.innerText)
-
+                tmpl.put(attrs["name"], node.innerText)
+        )
     ),
     XmlElement(
         name: "do",
-        call: proc(tmpl: XmlTemplate, head: XmlNode, node: XmlNode, parent: XmlNode): void {.closure .} =
-            let
-                attrs  = tmpl.getAttrs(node, @["if"])
-            if not attrs.hasKey("if"):
-                raise newException(ValueError, "The `do` tag outside a `try` must provide an `if` attribute")
-            if attrs["if"]:
-                for child in node:
-                    tmpl.add(head, child, parent)
+        call: ElementHook as (
+            block:
+                let
+                    attrs  = tmpl.getAttrs(node, @["if"])
+                if not attrs.hasKey("if"):
+                    raise newException(ValueError, "The `do` tag outside a `try` must provide an `if` attribute")
+                if attrs["if"]:
+                    for child in node:
+                        tmpl.add(head, child, parent)
+        )
     ),
     XmlElement(
         name: "try",
-        call: proc(tmpl: XmlTemplate, head: XmlNode, node: XmlNode, parent: XmlNode): void {.closure .} =
-            for child in node:
-                if child.kind == xnElement and child.tag != "do":
-                    raise newException(ValueError, "The `try` tag must contain only `do` tags")
+        call: ElementHook as (
+            block:
+                for child in node:
+                    if child.kind == xnElement and child.tag != "do":
+                        raise newException(ValueError, "The `try` tag must contain only `do` tags")
 
-            for child in node:
-                if child.kind == xnElement:
-                    let
-                        attrs = tmpl.getAttrs(child, @["if"])
-                    if not attrs.hasKey("if") or attrs["if"]:
-                        for dochild in child:
-                            tmpl.add(head, dochild, parent)
-                        break
+                for child in node:
+                    if child.kind == xnElement:
+                        let
+                            attrs = tmpl.getAttrs(child, @["if"])
+                        if not attrs.hasKey("if") or attrs["if"]:
+                            for dochild in child:
+                                tmpl.add(head, dochild, parent)
+                            break
+        )
 
     ),
     XmlElement(
         name: "for",
-        call: proc(tmpl: XmlTemplate, head: XmlNode, node: XmlNode, parent: XmlNode): void {.closure .} =
-            let
-                attrs  = tmpl.getAttrs(node, @["key", "val", "in"])
-                valSet = attrs.hasKey("val")
-                keySet = attrs.hasKey("key")
+        call: ElementHook as (
+            block:
+                let
+                    attrs  = tmpl.getAttrs(node, @["key", "val", "in"])
+                    valSet = attrs.hasKey("val")
+                    keySet = attrs.hasKey("key")
 
-            if not attrs.hasKey("in"):
-                raise newException(ValueError, "The `for` tag must provide an `in` attribute")
+                if not attrs.hasKey("in"):
+                    raise newException(ValueError, "The `for` tag must provide an `in` attribute")
 
-            if attrs["in"] of array:
-                tmpl.beginScope()
-                for i in 0..^attrs["in"]:
-                    if valSet:
-                        tmpl.set(attrs["val"], attrs["in"][i])
-                    if keySet:
-                        tmpl.set(attrs["key"], i)
-                    for child in node:
-                        tmpl.add(head, child, parent)
+                if attrs["in"] of array:
+                    tmpl.beginScope()
+                    for i in 0..^attrs["in"]:
+                        if valSet:
+                            tmpl.set(attrs["val"], attrs["in"][i])
+                        if keySet:
+                            tmpl.set(attrs["key"], i)
+                        for child in node:
+                            tmpl.add(head, child, parent)
 
-                tmpl.closeScope()
+                    tmpl.closeScope()
 
-            elif attrs["in"] of object:
-                discard
-            else:
-                raise newException(ValueError, "The 'in' attribute must be array/object")
+                elif attrs["in"] of object:
+                    discard
+                else:
+                    raise newException(ValueError, "The 'in' attribute must be array/object")
+        )
     ),
 ]
 

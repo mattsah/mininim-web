@@ -23,8 +23,8 @@ type
         name*: string
         priority*: int
 
-    MiddlewareNext* = proc(request: Request): Response {. closure, gcsafe .}
-    MiddlewareHook* = proc(HttpServer: HttpServer, request: Request, pos: int): Response {. closure, gcsafe .}
+    MiddlewareNext* = proc(request: Request): Response {. gcsafe .}
+    MiddlewareHook* = proc(request: Request, next: MiddlewareNext): Response {. gcsafe .}
 
     HttpServer* = ref object of Class
         middleware*: seq[Middleware]
@@ -38,7 +38,7 @@ begin Request:
     discard
 
 begin Request:
-    method get*(name: string, default: string = ""): string {. base .} =
+    method get*(name: string, default: string = ""): string =
         let
             value = this.pathParams.getOrDefault(name, default)
 
@@ -54,25 +54,15 @@ begin Middleware:
 ]#
 shape Middleware: @[
     Hook(
-        call: proc(server: HttpServer, request: Request, pos: int): Response {. closure .}=
-            let
-                head = this.app.get(shape)
-                next = proc(request: Request): Response =
-                    if pos > server.middleware.high:
-                        result = Response(status: HttpCode(404))
-                    else:
-                        result = server.middleware[pos][MiddlewareHook](
-                            server,
-                            request,
-                            pos + 1
-                        )
-
-            result = head.handle(request, next)
+        call: MiddlewareHook as (
+            block:
+                result = this.app.get(shape).handle(request, next)
+        )
     )
 ]
 
 begin Handler:
-    method handle*(request: Request, next: MiddlewareNext): Response {. base .} =
+    method handle*(request: Request, next: MiddlewareNext): Response {. gcsafe .} =
         result        = next(request)
         result.status = HttpCode(200)
         result.stream = newStringStream("Hello Mininim!")
@@ -84,31 +74,46 @@ shape Handler: @[
 ]
 
 begin HttpServer:
-    method run*(): int {. base .} =
+    method run*(): int =
         let
             port = Port(os.getEnv("WEB_SERVER_PORT", "31337").parseInt())
             server = newServer(
                 workerThreads = os.getEnv("WEB_SERVER_WORKERS", "128").parseInt(),
-                handler = proc(request: Request) {. gcsafe .} =
-                    let
-                        response = this.middleware[0][MiddlewareHook](
-                            this,
-                            request,
-                            1 # There is always at least one middleware, so we start this at 1
-                              # to ensure that the next callback generated in the Middleware Hook
-                              # will return a 404 appropriately.
+                handler = RequestHandler as (
+                    block:
+                        var
+                            stack: seq[MiddlewareNext] = @[]
+                            response: Response
+
+                        for i in 0..this.middleware.high:
+                            capture i:
+                                stack.add(
+                                    MiddlewareNext as (
+                                        block:
+                                            result = this.middleware[i][MiddlewareHook](request, stack[i + 1])
+                                    )
+                                )
+
+                        stack.add(
+                            MiddlewareNext as (
+                                block:
+                                    result = Response(status: HttpCode(404))
+                            )
                         )
 
-                    request.respond(
-                        response.status.int,
-                        response.headers,
-                        (
-                            if response.stream == nil:
-                                ""
-                            else:
-                                response.stream.readAll()
+                        response = stack[0](request)
+
+                        request.respond(
+                            response.status.int,
+                            response.headers,
+                            (
+                                if response.stream == nil:
+                                    ""
+                                else:
+                                    response.stream.readAll()
+                            )
                         )
-                    )
+                )
             )
 
         echo fmt "message[{align($this.type, 3, '0')}]: starting server on http://localhost:{port.int}"
@@ -139,7 +144,7 @@ begin HttpServer:
                     when defined(debug):
                         echo fmt "message[{align($middleware.class, 3, '0')}] registered middleware '{middleware.name}'"
 
-    method execute(console: Console): int {. base .} =
+    method execute(console: Console): int =
         result = this.run()
 
 shape HttpServer: @[

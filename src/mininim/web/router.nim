@@ -9,17 +9,16 @@ export
     web
 
 type
+    RouteHook* = proc(router: Router, request: Request): Response
+
     Route* = ref object of Facet
         path*: string
         methods*: seq[HttpMethod]
         params*: seq[string]
 
-    Router* = ref object of Class
+    Router* = ref object of Handler
         app: App
         tree: RouteTree
-        routes: seq[Route]
-
-    RouteHook* = proc(router: Router, request: Request): Response {. closure .}
 
     RouteList = Table[string, Route]
 
@@ -33,7 +32,7 @@ type
         router*: Router
 
 begin RouteTree:
-    method map(segment: string): string {. base .} =
+    method map(segment: string): string =
         result = segment
 
         var
@@ -47,7 +46,7 @@ begin RouteTree:
             else:
                 result = result.replace(match, fmt "(?P<{parts[0]}>.+)")
 
-    method match(request: Request): Route {. base .} =
+    method match(request: Request): Route =
         var
             branch: RouteTree = this
             found: bool
@@ -80,16 +79,18 @@ begin RouteTree:
         else:
             request.headers["Allow"] = branch.routes.keys.toSeq.join(", ")
             result = Route(
-                call: proc(router: Router, request: Request): Response =
-                    return Response(
-                        status: HttpCode(405),
-                        headers: HttpHeaders(@[
-                            ("Allow", request.headers["Allow"])
-                        ])
-                    )
+                call: RouteHook as (
+                    block:
+                        return Response(
+                            status: HttpCode(405),
+                            headers: HttpHeaders(@[
+                                ("Allow", request.headers["Allow"])
+                            ])
+                        )
+                )
             )
 
-    method add(route: Route): void {. base .} =
+    method add(route: Route): void =
         var
             branch: RouteTree = this
 
@@ -112,25 +113,27 @@ begin RouteTree:
             branch.routes[$verb] = route
 
 begin Action:
-    method invoke*(): Response {. base .} =
+    method invoke*(): Response =
         return Response(status: HttpCode(500))
 
 shape Route: @[
     Hook(
-        call: proc(router: Router, request: Request): Response {. closure .} =
-            let
-                action = this.app.get(shape)
+        call: RouteHook as (
+            block:
+                let
+                    action = this.app.get(shape)
 
-            action.request = request
-            action.router = router
+                action.request = request
+                action.router = router
 
-            result = action.invoke()
+                result = action.invoke()
+        )
     )
 
 ]
 
 begin Router:
-    method init*() {. base .} =
+    method init*() =
         this.tree = RouteTree.init()
 
     #[
@@ -140,13 +143,13 @@ begin Router:
         TODO: Parse routes and use more efficient internal data structure like a tree to make
         lookup faster.
     ]#
-    method add*(route: Route): void {. base .} =
+    method add*(route: Route): void =
         this.tree.add(route)
 
     #[
         Implementation of the middleware handle() method, since our router is just a middleware.
     ]#
-    method handle*(request: Request, next: MiddlewareNext): Response {. base .} =
+    method handle*(request: Request, next: MiddlewareNext): Response {. gcsafe .}=
         let
             route = this.tree.match(request)
 
@@ -158,15 +161,16 @@ begin Router:
 shape Router: @[
     Shared(),
     Delegate(
-        call: proc(): shape {. closure .} =
-            result = shape.init()
+        call: DelegateHook as (
+            block:
+                result = shape.init()
 
-            for route in this.app.config.findAll(Route):
-                result.add(route)
+                for route in this.app.config.findAll(Route):
+                    result.add(route)
 
-                when defined(debug):
-                    echo fmt "message[{align($this.scope, 3, '0')}] registered route: {route.path}"
-
+                    when defined(debug):
+                        echo fmt "message[{align($this.scope, 3, '0')}] registered route: {route.path}"
+        )
     ),
     Middleware(
         name: "router"
