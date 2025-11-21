@@ -17,7 +17,6 @@ type
         params*: seq[string]
 
     Router* = ref object of Handler
-        app: App
         tree: RouteTree
 
     RouteList = Table[string, Route]
@@ -81,7 +80,7 @@ begin RouteTree:
             result = Route(
                 call: RouteHook as (
                     block:
-                        return Response(
+                        result = Response(
                             status: HttpCode(405),
                             headers: HttpHeaders(@[
                                 ("Allow", request.headers["Allow"])
@@ -164,7 +163,6 @@ shape Router: @[
         call: DelegateHook as (
             block:
                 result = shape.init()
-
                 for route in this.app.config.findAll(Route):
                     result.add(route)
 

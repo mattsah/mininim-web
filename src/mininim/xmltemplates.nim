@@ -2,8 +2,9 @@ import
     mininim,
     mininim/dic,
     mininim/script,
-    std/xmlparser,
+    mininim/web/router,
     std/parsexml,
+    std/xmlparser,
     std/xmltree,
     std/streams,
     std/strtabs
@@ -19,8 +20,8 @@ type
 
     XmlTemplate* = ref object of Class
         root: XmlNode
-        data: seq[dyn]
         mode: seq[XmlMode]
+        data: seq[dyn] = @[]
         tree: XmlNode = newXmlTree("x", [])
         engine*: XmlEngine
 
@@ -138,7 +139,7 @@ begin XmlEngine:
 
         result = this.attrFilters[name](tmpl, value)
 
-    method load*(content: string): XmlTemplate {. base .} =
+    method load*(content: string, data: dyn = nil): XmlTemplate {. base .} =
         let
             stream = newStringStream("<x>" & content.strip & "</x>")
 
@@ -151,14 +152,17 @@ begin XmlEngine:
             })
         )
 
-    method loadFile*(filename: string): XmlTemplate {. base .} =
+        if data != nil:
+            result.data.add(data)
+
+    method loadFile*(filename: string, data: dyn = nil): XmlTemplate {. base .} =
         let
             stream = newFileStream(filename, fmRead)
 
         if stream == nil:
             raise newException(ValueError, "Cannot load file")
 
-        result = this.load(stream.readAll())
+        result = this.load(stream.readAll(), data)
 
     method withElement*(name: string, hook: ElementHook): void {. base .}=
         this.elements[name] = hook
@@ -170,6 +174,10 @@ begin XmlTemplate:
     method scope(index: var int): dyn {. base .} =
         if index < 0:
             index = this.data.high + index
+
+        if index < 0 or index > this.data.high:
+            raise newException(ValueError, fmt "Failed reading scope @ index {$index}, not available")
+
         result = this.data[index]
 
     method scope*(): dyn {. base .} =
@@ -261,16 +269,18 @@ begin XmlTemplate:
             else:
                 discard
 
-    method process*(data: dyn = (), mode: XmlMode = XmlEsc): XmlNode {. base .} =
-        this.data.add(data)
+    method process*(data: dyn = nil, mode: XmlMode = XmlEsc): XmlNode {. base .} =
         this.mode.add(mode)
+
+        if data != nil:
+            this.data.add(data)
 
         for child in this.root:
             this.add(this.tree, child, child)
 
         result = this.tree
 
-    method render*(data: dyn = (), mode: XmlMode = XmlEsc): string {. base .} =
+    method render*(data: dyn = nil, mode: XmlMode = XmlEsc): string {. base .} =
         for child in this.process(data, mode):
             when defined debug:
                 result.add(child.min(), 0, 4, true)
@@ -286,8 +296,8 @@ begin XmlTemplate:
     method put*(name: string, value: string): void {. base .} =
         this.scope[name] = Script.eval(value, this.scope)
 
-
 shape XmlEngine: @[
+    Shared(),
     Delegate(
         call: DelegateHook as (
             block:
@@ -442,6 +452,19 @@ shape XmlEngine: @[
     ),
 ]
 
+converter toResponse*(tmpl: XmlTemplate): Response =
+    result = Response(
+        status: HttpCode(200),
+        stream: newStringStream(tmpl.render()),
+        headers: HttpHeaders(@[
+            ("Content-Type", "text/html; ustf-8")
+        ])
+    )
 
+begin Action:
+    method xmlengine(): XmlEngine =
+        result = this.app.get(XmlEngine)
 
+    method html*(file: string, data: dyn = ()): XmlTemplate =
+        result = this.xmlengine.loadFile(file, data)
 
