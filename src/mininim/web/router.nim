@@ -148,7 +148,7 @@ begin Router:
     #[
         Implementation of the middleware handle() method, since our router is just a middleware.
     ]#
-    method handle*(request: Request, next: MiddlewareNext): Response {. gcsafe .}=
+    method handle*(request: Request, next: MiddlewareNext): Response {. gcsafe .} =
         let
             route = this.tree.match(request)
 

@@ -27,7 +27,8 @@ type
     MiddlewareHook* = proc(request: Request, next: MiddlewareNext): Response {. gcsafe .}
 
     HttpServer* = ref object of Class
-        middleware*: seq[Middleware]
+        middleware: seq[Middleware]
+        stack: seq[MiddlewareNext]
 
     Response* = object
         status*: HttpCode
@@ -82,26 +83,9 @@ begin HttpServer:
                 handler = RequestHandler as (
                     block:
                         var
-                            stack: seq[MiddlewareNext] = @[]
                             response: Response
 
-                        for i in 0..this.middleware.high:
-                            capture i:
-                                stack.add(
-                                    MiddlewareNext as (
-                                        block:
-                                            result = this.middleware[i][MiddlewareHook](request, stack[i + 1])
-                                    )
-                                )
-
-                        stack.add(
-                            MiddlewareNext as (
-                                block:
-                                    result = Response(status: HttpCode(404))
-                            )
-                        )
-
-                        response = stack[0](request)
+                        response = this.stack[0](request)
 
                         request.respond(
                             response.status.int,
@@ -117,6 +101,26 @@ begin HttpServer:
                         response.stream.close()
                 )
             )
+
+        #
+        # Set up our middleware stack
+        #
+
+        for i in 0..this.middleware.high:
+            capture i:
+                this.stack.add(
+                    MiddlewareNext as (
+                        block:
+                            result = this.middleware[i][MiddlewareHook](request, this.stack[i + 1])
+                    )
+                )
+
+        this.stack.add(
+            MiddlewareNext as (
+                block:
+                    result = Response(status: HttpCode(404))
+            )
+        )
 
         echo fmt "message[{align($this.type, 3, '0')}]: starting server on http://localhost:{port.int}"
         server.serve(port)

@@ -40,13 +40,13 @@ type
         attrfilters: Table[string, AttrFilterHook]
 
 begin XmlNode:
-    method delete*(child: XmlNode): void {. base .} =
+    method delete*(child: XmlNode): void =
         for i in 0..<this.len:
             if child == this[i]:
                 this.delete(i)
                 break
 
-    method min(): XmlNode {. base .}=
+    method min(): XmlNode =
         const
             txt = [xnText, xnVerbatimText]
             pre = ["pre", "code", "textarea", "script", "style"]
@@ -133,13 +133,13 @@ begin XmlEngine:
         this.elements = initTable[string, ElementHook]()
         this.attrFilters = initTable[string, AttrFilterHook]()
 
-    method filter*(tmpl: XmlTemplate, name: string, value: dyn): dyn {. base .}=
+    method filter*(tmpl: XmlTemplate, name: string, value: dyn): dyn =
         if not this.attrFilters.hasKey(name):
             raise newException(ValueError, fmt "Unknown filter '{name}'")
 
         result = this.attrFilters[name](tmpl, value)
 
-    method load*(content: string, data: dyn = nil): XmlTemplate {. base .} =
+    method load*(content: string, data: dyn = nil): XmlTemplate =
         let
             stream = newStringStream("<x>" & content.strip & "</x>")
 
@@ -157,7 +157,7 @@ begin XmlEngine:
 
         close(stream)
 
-    method loadFile*(filename: string, data: dyn = nil): XmlTemplate {. base .} =
+    method loadFile*(filename: string, data: dyn = nil): XmlTemplate =
         let
             stream = newFileStream(filename, fmRead)
 
@@ -168,14 +168,14 @@ begin XmlEngine:
 
         stream.close()
 
-    method withElement*(name: string, hook: ElementHook): void {. base .}=
+    method withElement*(name: string, hook: ElementHook): void =
         this.elements[name] = hook
 
-    method withAttrFilter*(name: string, hook: AttrFilterHook): void {. base .}=
+    method withAttrFilter*(name: string, hook: AttrFilterHook): void =
         this.attrFilters[name] = hook
 
 begin XmlTemplate:
-    method scope(index: var int): dyn {. base .} =
+    method scope(index: var int): dyn =
         if index < 0:
             index = this.data.high + index
 
@@ -184,36 +184,36 @@ begin XmlTemplate:
 
         result = this.data[index]
 
-    method scope*(): dyn {. base .} =
+    method scope*(): dyn =
         var
             current = this.data.high
         result = this.scope(current)
 
-    method closeScope*(): void {. base .} =
+    method closeScope*(): void =
         discard this.data.pop()
 
-    method beginScope*() {. base .} =
+    method beginScope*() =
         this.data.add(copy this.scope)
 
-    method closeMode*(): void {. base .} =
+    method closeMode*(): void =
         discard this.mode.pop()
 
-    method beginMode*(mode: XmlMode) {. base .} =
+    method beginMode*(mode: XmlMode) =
         this.mode.add(mode)
 
-    method eval*(value: dyn): dyn {. base .}=
+    method eval*(value: dyn): dyn =
         if this.mode[^1] == XmlRaw:
             result = value
         else:
             result = Script.eval(value, this.scope)
 
-    method fill*(value: string): string {. base .}=
+    method fill*(value: string): string =
         if this.mode[^1] == XmlRaw:
             result = value
         else:
             result = Script.fill(value, this.scope)
 
-    method getAttrs*(node: XmlNode, ours: seq[string] = @[]): Table[string, dyn] {. base .} =
+    method getAttrs*(node: XmlNode, ours: seq[string] = @[]): Table[string, dyn] =
         if node.attrsLen > 0:
             for key, value in node.attrs.pairs:
                 let
@@ -235,14 +235,14 @@ begin XmlTemplate:
                     result[key] = this.fill(value)
 
 
-    method clone*(node: XmlNode): XmlNode {. base .} =
+    method clone*(node: XmlNode): XmlNode =
         result = newXmlTree(node.tag, [], node.attrs)
 
         if result.attrs != nil:
             for key, value in result.attrs.pairs:
                 result.attrs[key] = this.fill(value)
 
-    method add*(head: XmlNode, node: XmlNode, parent: XmlNode): void {. base .} =
+    method add*(head: XmlNode, node: XmlNode, parent: XmlNode): void =
         case node.kind:
             of xnElement:
                 let
@@ -273,7 +273,7 @@ begin XmlTemplate:
             else:
                 discard
 
-    method process*(data: dyn = nil, mode: XmlMode = XmlEsc): XmlNode {. base .} =
+    method process*(data: dyn = nil, mode: XmlMode = XmlEsc): XmlNode =
         this.mode.add(mode)
 
         if data != nil:
@@ -284,7 +284,7 @@ begin XmlTemplate:
 
         result = this.tree
 
-    method render*(data: dyn = nil, mode: XmlMode = XmlEsc): string {. base .} =
+    method render*(data: dyn = nil, mode: XmlMode = XmlEsc): string =
         for child in this.process(data, mode):
             when defined debug:
                 result.add(child.min(), 0, 4, true)
@@ -294,10 +294,10 @@ begin XmlTemplate:
     #[
 
     ]#
-    method set*(name: string, value: dyn): void {. base .} =
+    method set*(name: string, value: dyn): void =
         this.scope[name] = value
 
-    method put*(name: string, value: string): void {. base .} =
+    method put*(name: string, value: string): void =
         this.scope[name] = Script.eval(value, this.scope)
 
 shape XmlEngine: @[
