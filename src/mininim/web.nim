@@ -113,6 +113,8 @@ begin HttpServer:
                                     response.stream.readAll()
                             )
                         )
+
+                        response.stream.close()
                 )
             )
 

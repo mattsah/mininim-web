@@ -155,6 +155,8 @@ begin XmlEngine:
         if data != nil:
             result.data.add(data)
 
+        close(stream)
+
     method loadFile*(filename: string, data: dyn = nil): XmlTemplate {. base .} =
         let
             stream = newFileStream(filename, fmRead)
@@ -163,6 +165,8 @@ begin XmlEngine:
             raise newException(ValueError, "Cannot load file")
 
         result = this.load(stream.readAll(), data)
+
+        stream.close()
 
     method withElement*(name: string, hook: ElementHook): void {. base .}=
         this.elements[name] = hook
@@ -467,4 +471,3 @@ begin Action:
 
     method html*(file: string, data: dyn = ()): XmlTemplate =
         result = this.xmlengine.loadFile(file, data)
-
