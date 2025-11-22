@@ -1,9 +1,15 @@
 import
-    mummy,
     mininim,
     mininim/dic,
     mininim/cli,
-    std/streams
+    mummy/common,
+    webby/httpheaders,
+    webby/queryparams,
+    std/uri,
+    std/streams,
+    std/nativesockets
+
+from mummy import nil, newServer, serve, respond
 
 from std/httpcore import
     HttpCode,
@@ -11,10 +17,15 @@ from std/httpcore import
 
 export
     dic,
-    mummy,
+    uri,
+    common,
     streams,
-    HttpCode,
-    HttpMethod
+    httpheaders,
+    queryparams,
+    HttpVersion,
+    HttpMethod,
+    HttpCode
+
 
 type
     Handler* = ref object of Class
@@ -30,20 +41,32 @@ type
         middleware: seq[Middleware]
         stack: seq[MiddlewareNext]
 
-    Response* = object
+    Request* = ref object of Class
+        base*: mummy.Request
+        uri*: Uri
+        httpMethod*: HttpMethod
+
+    Response* = ref object of Class
         status*: HttpCode
         stream*: Stream
         headers*: HttpHeaders
 
-begin Request:
-    discard
+converter toRequest(this: mummy.Request): Request =
+    result = Request(
+        base: this,
+        uri: parseUri(this.uri),
+        httpMethod: parseEnum[HttpMethod](this.httpMethod)
+    )
 
 begin Request:
-    method get*(name: string, default: string = ""): string =
-        let
-            value = this.pathParams.getOrDefault(name, default)
+    method headers*: var HttpHeaders =
+        result = this.base.headers
 
-        result = if value != "": value else: default
+    method pathParams*: var PathParams =
+        result = this.base.pathParams
+
+    method queryParams*: var QueryParams =
+        result = this.base.queryParams
 
 begin Middleware:
     discard
@@ -80,26 +103,23 @@ begin HttpServer:
             port = Port(os.getEnv("WEB_SERVER_PORT", "31337").parseInt())
             server = newServer(
                 workerThreads = os.getEnv("WEB_SERVER_WORKERS", "128").parseInt(),
-                handler = RequestHandler as (
-                    block:
-                        var
-                            response: Response
+                handler = proc(baseRequest: mummy.Request): void =
+                    let
+                        request: Request = baseRequest
+                        response: Response = this.stack[0](request)
 
-                        response = this.stack[0](request)
-
-                        request.respond(
-                            response.status.int,
-                            response.headers,
-                            (
-                                if response.stream == nil:
-                                    ""
-                                else:
-                                    response.stream.readAll()
-                            )
+                    request.base.respond(
+                        response.status.int,
+                        response.headers,
+                        (
+                            if response.stream == nil:
+                                ""
+                            else:
+                                response.stream.readAll()
                         )
+                    )
 
-                        response.stream.close()
-                )
+                    response.stream.close()
             )
 
         #

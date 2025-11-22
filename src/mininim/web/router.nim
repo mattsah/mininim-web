@@ -19,7 +19,7 @@ type
     Router* = ref object of Handler
         tree: RouteTree
 
-    RouteList = Table[string, Route]
+    RouteList = Table[HttpMethod, Route]
 
     RouteTree = ref object of Class
         nodes: Table[string, RouteTree]
@@ -50,7 +50,7 @@ begin RouteTree:
             branch: RouteTree = this
             found: bool
 
-        for segment in request.path.split('/'):
+        for segment in request.uri.path.split('/'):
             found = false
 
             if branch.nodes.contains(segment):
@@ -66,7 +66,7 @@ begin RouteTree:
                         branch = branch.tests[test]
 
                         for name, value in get(matches).captures.toTable:
-                            request.pathParams[name] = value
+                            request.base.pathParams[name] = value
 
                         break
 
@@ -109,11 +109,17 @@ begin RouteTree:
                 branch = branch.nodes[segment]
 
         for verb in route.methods:
-            branch.routes[$verb] = route
+            branch.routes[verb] = route
 
 begin Action:
     method invoke*(): Response =
         return Response(status: HttpCode(500))
+
+    method get*(name: string, default: string = ""): string =
+        let
+            value = this.request.pathParams.getOrDefault(name, default)
+
+        result = if value != "": value else: default
 
 shape Route: @[
     Hook(

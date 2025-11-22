@@ -466,7 +466,7 @@ converter toResponse*(tmpl: XmlTemplate): Response =
     )
 
 begin Action:
-    method xmlengine(): XmlEngine =
+    method xmlengine: XmlEngine =
         result = this.app.get(XmlEngine)
 
     method html*(file: string, data: dyn = ()): XmlTemplate =
