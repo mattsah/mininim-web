@@ -252,6 +252,21 @@ begin XmlTemplate:
                     when defined debug:
                         echo fmt "Performing custom handling for <{tag}>"
                     this.engine.elements[tag](this, head, node, parent)
+                elif tag.startsWith("x:"):
+                    let
+                        parts = tag.split(":")
+                        path = parts[1..^1].join("/")
+                        tmpl = this.engine.loadFile("resources/tags/" & path & ".html")
+
+                    this.beginScope()
+
+                    for name, value in this.getAttrs(node).pairs:
+                        this.scope[name] = value
+
+                    for child in tmpl.root:
+                        this.add(head, child, parent)
+
+                    this.closeScope()
                 else:
                     let
                         clone = this.clone(node)

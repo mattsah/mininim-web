@@ -104,22 +104,32 @@ begin HttpServer:
             server = newServer(
                 workerThreads = os.getEnv("WEB_SERVER_WORKERS", "128").parseInt(),
                 handler = proc(baseRequest: mummy.Request): void =
-                    let
-                        request: Request = baseRequest
-                        response: Response = this.stack[0](request)
+                    try:
+                        let
+                            request: Request = baseRequest
+                            response: Response = this.stack[0](request)
 
-                    request.base.respond(
-                        response.status.int,
-                        response.headers,
-                        (
-                            if response.stream == nil:
-                                ""
-                            else:
-                                response.stream.readAll()
+                        baseRequest.respond(
+                            response.status.int,
+                            response.headers,
+                            (
+                                if response.stream == nil:
+                                    ""
+                                else:
+                                    response.stream.readAll()
+                            )
                         )
-                    )
 
-                    response.stream.close()
+                        response.stream.close()
+
+                    except:
+                        baseRequest.respond(
+                            HttpCode(500).int,
+                            HttpHeaders(@[
+                                ("Content-Type", "text/plain; utf-8")
+                            ]),
+                            getCurrentExceptionMsg()
+                        )
             )
 
         #
