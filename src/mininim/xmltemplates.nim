@@ -229,6 +229,11 @@ begin XmlTemplate:
     method scope*(): dyn {. base .} =
         var
             current = this.data.high
+
+        if current < 0:
+            current = 0
+            this.data.add(())
+
         result = this.scope(current)
 
     method closeScope*(): void {. base .} =
