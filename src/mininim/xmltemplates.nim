@@ -184,6 +184,13 @@ begin XmlTemplate:
 
         result = this.data[index]
 
+    method context*(): dyn =
+        result = ()
+
+        for i in 0..this.data.high:
+            for name, value in this.data[i].pairs:
+                result[name] = value
+
     method scope*(): dyn =
         var
             current = this.data.high
@@ -192,8 +199,11 @@ begin XmlTemplate:
     method closeScope*(): void =
         discard this.data.pop()
 
-    method beginScope*() =
-        this.data.add(copy this.scope)
+    method beginScope*(scope: dyn = null) =
+        if scope == null:
+            this.data.add(copy this.scope)
+        else:
+            this.data.add(scope)
 
     method closeMode*(): void =
         discard this.mode.pop()
@@ -258,7 +268,7 @@ begin XmlTemplate:
                         path = parts[1..^1].join("/")
                         tmpl = this.engine.loadFile("resources/tags/" & path & ".html")
 
-                    this.beginScope()
+                    this.beginScope((context: this.context))
 
                     for name, value in this.getAttrs(node).pairs:
                         this.scope[name] = value
@@ -353,9 +363,11 @@ shape XmlEngine: @[
                 let
                     script = tmpl.clone(node)
 
-
-                for child in node:
-                    tmpl.add(script, child, parent)
+                if node.len == 0:
+                    tmpl.add(script, newText(""), parent)
+                else:
+                    for child in node:
+                        tmpl.add(script, child, parent)
 
                 tmpl.closeMode()
                 head.add(script)
