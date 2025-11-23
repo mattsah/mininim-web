@@ -3,11 +3,12 @@ import
     mininim/dic,
     mininim/script,
     mininim/web/router,
-    std/parsexml,
+    checksums/md5,
     std/xmlparser,
+    std/parsexml,
     std/xmltree,
     std/streams,
-    std/strtabs
+    std/strtabs,
 
 export
     xmltree
@@ -36,17 +37,18 @@ type
         name*: string
 
     XmlEngine* = ref object of Class
+        tmplCache: Table[string, XmlNode]
         elements: Table[string, ElementHook]
         attrfilters: Table[string, AttrFilterHook]
 
 begin XmlNode:
-    method delete*(child: XmlNode): void =
+    method delete*(child: XmlNode): void {. base .} =
         for i in 0..<this.len:
             if child == this[i]:
                 this.delete(i)
                 break
 
-    method min(): XmlNode =
+    method min(): XmlNode {. base .} =
         const
             txt = [xnText, xnVerbatimText]
             pre = ["pre", "code", "textarea", "script", "style"]
@@ -133,40 +135,70 @@ begin XmlEngine:
         this.elements = initTable[string, ElementHook]()
         this.attrFilters = initTable[string, AttrFilterHook]()
 
-    method filter*(tmpl: XmlTemplate, name: string, value: dyn): dyn =
+    method filter*(tmpl: XmlTemplate, name: string, value: dyn): dyn {. base .} =
         if not this.attrFilters.hasKey(name):
             raise newException(ValueError, fmt "Unknown filter '{name}'")
 
         result = this.attrFilters[name](tmpl, value)
 
-    method load*(content: string, data: dyn = nil): XmlTemplate =
+    method load(loader: proc(): XmlTemplate, hash: string, data: dyn = nil): XmlTemplate =
+        if this.tmplCache.contains(hash):
+            result = XmlTemplate(
+                engine: this,
+                root: this.tmplCache[hash]
+            )
+
+            if data != nil:
+                result.data.add(data)
+        else:
+            result = loader()
+            this.tmplCache[hash] = XmlTemplate(
+                engine: this,
+                root: result.root
+            )
+
+    method loadString*(content: string, data: dyn = nil): XmlTemplate =
         let
-            stream = newStringStream("<x>" & content.strip & "</x>")
+            loader = proc(): XmlTemplate =
+                let
+                    stream = newStringStream("<x>" & content.strip & "</x>")
 
-        result = XmlTemplate(
-            engine: this,
-            root: parseXml(stream, {
-                allowEmptyAttribs,
-                allowUnquotedAttribs,
-                reportWhitespace
-            })
-        )
+                result = XmlTemplate(
+                    engine: this,
+                    root: parseXml(stream, {
+                        allowEmptyAttribs,
+                        allowUnquotedAttribs,
+                        reportWhitespace
+                    })
+                )
 
-        if data != nil:
-            result.data.add(data)
+                if data != nil:
+                    result.data.add(data)
 
-        close(stream)
+                close(stream)
+
+        if this.useCache:
+            result = this.load(loader, content.getMD5(), data)
+        else:
+            result = loader()
+
 
     method loadFile*(filename: string, data: dyn = nil): XmlTemplate =
         let
-            stream = newFileStream(filename, fmRead)
+            loader = proc(): XmlTemplate =
+                let
+                    stream = newFileStream(filename, fmRead)
 
-        if stream == nil:
-            raise newException(ValueError, "Cannot load file")
+                if stream == nil:
+                    raise newException(ValueError, "Cannot load file")
 
-        result = this.load(stream.readAll(), data)
+                result = this.loadString(stream.readAll(), data)
+                stream.close()
 
-        stream.close()
+        if this.useCache:
+            result = this.load(loader, filename.getMD5(), data)
+        else:
+            result = loader()
 
     method withElement*(name: string, hook: ElementHook): void =
         this.elements[name] = hook
@@ -379,7 +411,7 @@ shape XmlEngine: @[
             block:
                 for child in node:
                     let
-                        plate = tmpl.engine.load(tmpl.fill($child))
+                        plate = tmpl.engine.loadString(tmpl.fill($child))
                         tree = plate.process((), XmlRaw)
 
                     for subchild in tree:
@@ -392,7 +424,7 @@ shape XmlEngine: @[
             block:
                 for child in node:
                     let
-                        plate = tmpl.engine.load(tmpl.fill($child))
+                        plate = tmpl.engine.loadString(tmpl.fill($child))
                         tree = plate.process(copy tmpl.scope)
 
                     for subchild in tree:
