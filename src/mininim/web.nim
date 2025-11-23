@@ -7,6 +7,7 @@ import
     webby/queryparams,
     std/uri,
     std/streams,
+    std/algorithm,
     std/nativesockets
 
 from mummy import nil, newServer, serve, respond
@@ -32,7 +33,7 @@ type
 
     Middleware* = ref object of Facet
         name*: string
-        priority*: int
+        priority*: int = 500
 
     MiddlewareNext* = proc(request: Request): Response {. gcsafe .}
     MiddlewareHook* = proc(request: Request, next: MiddlewareNext): Response {. gcsafe .}
@@ -160,7 +161,7 @@ begin HttpServer:
     proc build(app: App): self {. static .} =
         result = self.init()
 
-        let
+        var
             middlewares = app.config.findAll(Middleware)
 
         if middlewares.len == 1:
@@ -173,6 +174,11 @@ begin HttpServer:
                 echo fmt "message[{align($default.class, 3, '0')}] registered middleware '{default.name}'"
 
         else:
+            middlewares.sort(
+                proc(a, b: Middleware): int =
+                    result = a.priority - b.priority
+            )
+
             for middleware in middlewares:
                 if middleware.scope != Handler:
                     result.middleware.add(middleware)

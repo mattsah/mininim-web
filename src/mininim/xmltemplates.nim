@@ -8,7 +8,7 @@ import
     std/parsexml,
     std/xmltree,
     std/streams,
-    std/strtabs,
+    std/strtabs
 
 export
     xmltree
@@ -141,8 +141,11 @@ begin XmlEngine:
 
         result = this.attrFilters[name](tmpl, value)
 
-    method load(loader: proc(): XmlTemplate, hash: string, data: dyn = nil): XmlTemplate =
+    method load(loader: proc(): XmlTemplate, hash: string, data: dyn = nil): XmlTemplate {. base .} =
         if this.tmplCache.contains(hash):
+            when defined debug:
+                echo fmt "Loading template [{hash}] from cache"
+
             result = XmlTemplate(
                 engine: this,
                 root: this.tmplCache[hash]
@@ -151,13 +154,13 @@ begin XmlEngine:
             if data != nil:
                 result.data.add(data)
         else:
-            result = loader()
-            this.tmplCache[hash] = XmlTemplate(
-                engine: this,
-                root: result.root
-            )
+            when defined debug:
+                echo fmt "Storing template [{hash}] to cache"
 
-    method loadString*(content: string, data: dyn = nil): XmlTemplate =
+            result = loader()
+            this.tmplCache[hash] = result.root
+
+    method loadString*(content: string, data: dyn = nil): XmlTemplate {. base .} =
         let
             loader = proc(): XmlTemplate =
                 let
@@ -183,7 +186,7 @@ begin XmlEngine:
             result = loader()
 
 
-    method loadFile*(filename: string, data: dyn = nil): XmlTemplate =
+    method loadFile*(filename: string, data: dyn = nil): XmlTemplate {. base .} =
         let
             loader = proc(): XmlTemplate =
                 let
@@ -200,14 +203,14 @@ begin XmlEngine:
         else:
             result = loader()
 
-    method withElement*(name: string, hook: ElementHook): void =
+    method withElement*(name: string, hook: ElementHook): void {. base .} =
         this.elements[name] = hook
 
-    method withAttrFilter*(name: string, hook: AttrFilterHook): void =
+    method withAttrFilter*(name: string, hook: AttrFilterHook): void {. base .} =
         this.attrFilters[name] = hook
 
 begin XmlTemplate:
-    method scope(index: var int): dyn =
+    method scope(index: var int): dyn {. base .} =
         if index < 0:
             index = this.data.high + index
 
@@ -216,46 +219,46 @@ begin XmlTemplate:
 
         result = this.data[index]
 
-    method context*(): dyn =
+    method context*(): dyn {. base .} =
         result = ()
 
         for i in 0..this.data.high:
             for name, value in this.data[i].pairs:
                 result[name] = value
 
-    method scope*(): dyn =
+    method scope*(): dyn {. base .} =
         var
             current = this.data.high
         result = this.scope(current)
 
-    method closeScope*(): void =
+    method closeScope*(): void {. base .} =
         discard this.data.pop()
 
-    method beginScope*(scope: dyn = null) =
+    method beginScope*(scope: dyn = null) {. base .} =
         if scope == null:
             this.data.add(copy this.scope)
         else:
             this.data.add(scope)
 
-    method closeMode*(): void =
+    method closeMode*(): void {. base .} =
         discard this.mode.pop()
 
-    method beginMode*(mode: XmlMode) =
+    method beginMode*(mode: XmlMode) {. base .} =
         this.mode.add(mode)
 
-    method eval*(value: dyn): dyn =
+    method eval*(value: dyn): dyn {. base .} =
         if this.mode[^1] == XmlRaw:
             result = value
         else:
             result = Script.eval(value, this.scope)
 
-    method fill*(value: string): string =
+    method fill*(value: string): string {. base .} =
         if this.mode[^1] == XmlRaw:
             result = value
         else:
             result = Script.fill(value, this.scope)
 
-    method getAttrs*(node: XmlNode, ours: seq[string] = @[]): Table[string, dyn] =
+    method getAttrs*(node: XmlNode, ours: seq[string] = @[]): Table[string, dyn] {. base .} =
         if node.attrsLen > 0:
             for key, value in node.attrs.pairs:
                 let
@@ -277,14 +280,14 @@ begin XmlTemplate:
                     result[key] = this.fill(value)
 
 
-    method clone*(node: XmlNode): XmlNode =
+    method clone*(node: XmlNode): XmlNode {. base .} =
         result = newXmlTree(node.tag, [], node.attrs)
 
         if result.attrs != nil:
             for key, value in result.attrs.pairs:
                 result.attrs[key] = this.fill(value)
 
-    method add*(head: XmlNode, node: XmlNode, parent: XmlNode): void =
+    method add*(head: XmlNode, node: XmlNode, parent: XmlNode): void {. base .} =
         case node.kind:
             of xnElement:
                 let
@@ -330,7 +333,7 @@ begin XmlTemplate:
             else:
                 discard
 
-    method process*(data: dyn = nil, mode: XmlMode = XmlEsc): XmlNode =
+    method process*(data: dyn = nil, mode: XmlMode = XmlEsc): XmlNode {. base .} =
         this.mode.add(mode)
 
         if data != nil:
@@ -341,7 +344,7 @@ begin XmlTemplate:
 
         result = this.tree
 
-    method render*(data: dyn = nil, mode: XmlMode = XmlEsc): string =
+    method render*(data: dyn = nil, mode: XmlMode = XmlEsc): string {. base .} =
         for child in this.process(data, mode):
             when defined debug:
                 result.add(child.min(), 0, 4, true)
@@ -351,10 +354,10 @@ begin XmlTemplate:
     #[
 
     ]#
-    method set*(name: string, value: dyn): void =
+    method set*(name: string, value: dyn): void {. base .} =
         this.scope[name] = value
 
-    method put*(name: string, value: string): void =
+    method put*(name: string, value: string): void {. base .} =
         this.scope[name] = Script.eval(value, this.scope)
 
 shape XmlEngine: @[
@@ -525,8 +528,8 @@ converter toResponse*(tmpl: XmlTemplate): Response =
     )
 
 begin Action:
-    method xmlengine: XmlEngine =
+    method xmlengine: XmlEngine {. base .} =
         result = this.app.get(XmlEngine)
 
-    method html*(file: string, data: dyn = ()): XmlTemplate =
+    method html*(file: string, data: dyn = ()): XmlTemplate {. base .} =
         result = this.xmlengine.loadFile(file, data)

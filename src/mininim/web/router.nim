@@ -177,6 +177,7 @@ shape Router: @[
         )
     ),
     Middleware(
-        name: "router"
+        name: "router",
+        priority: 999
     )
 ]
