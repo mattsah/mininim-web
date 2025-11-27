@@ -37,9 +37,9 @@ type
         name*: string
 
     XmlEngine* = ref object of Class
-        tmplCache: Table[string, XmlNode]
-        elements: Table[string, ElementHook]
-        attrfilters: Table[string, AttrFilterHook]
+        tmplCache: TableRef[string, XmlNode]
+        elements: TableRef[string, ElementHook]
+        attrfilters: TableRef[string, AttrFilterHook]
 
 begin XmlNode:
     method delete*(child: XmlNode): void {. base .} =
@@ -132,8 +132,9 @@ begin XmlNode:
 
 begin XmlEngine:
     proc init*(): void =
-        this.elements = initTable[string, ElementHook]()
-        this.attrFilters = initTable[string, AttrFilterHook]()
+        this.tmplCache = newTable[string, XmlNode]()
+        this.elements = newTable[string, ElementHook]()
+        this.attrFilters = newTable[string, AttrFilterHook]()
 
     method filter*(tmpl: XmlTemplate, name: string, value: dyn): dyn {. base .} =
         if not this.attrFilters.hasKey(name):
@@ -270,8 +271,8 @@ begin XmlTemplate:
                     parts = key.split(':')
 
                 if this.mode[^1] != XmlRaw and parts.len > 1 and (ours.len == 0 or parts[0] in ours):
-                    if parts.len == 2 and parts[1] == "":
-                        # This is a merge attribute, eh?
+                    if parts.len >= 2 and parts[^1] == "":
+                        # Ignore merge attributes
                         discard
                     else:
                         let
@@ -286,13 +287,13 @@ begin XmlTemplate:
 
 
     method clone*(node: XmlNode): XmlNode {. base .} =
-        result = newXmlTree(node.tag, [], node.attrs)
+        result = newXmlTree(node.tag, [], toXmlAttributes())
 
-        if result.attrs != nil:
-            for key, value in result.attrs.pairs:
-                result.attrs[key] = this.fill(value)
+        if node.attrs != nil:
+            for name, value in node.attrs.pairs:
+                result.attrs[name] = this.fill(value)
 
-    method add*(head: XmlNode, node: XmlNode, parent: XmlNode): void {. base .} =
+    method add*(head, node, parent: XmlNode, merge = newTable[string, string]()): void {. base .} =
         case node.kind:
             of xnElement:
                 let
@@ -302,28 +303,44 @@ begin XmlTemplate:
                     when defined debug:
                         echo fmt "Performing custom handling for <{tag}>"
                     this.engine.elements[tag](this, head, node, parent)
-                elif tag.startsWith("x:"):
+                elif tag == "x" or tag.startsWith("x:"):
                     let
                         parts = tag.split(":")
-                        path = parts[1..^1].join("/")
-                        tmpl = this.engine.loadFile("resources/tags/" & path & ".html")
+                        path = parts[1..^1].join("/").strip(chars = {'/'}, leading = false)
 
-                    this.beginScope((context: this.context))
+                    if node.attrs != nil:
+                        for name, value in node.attrs.pairs:
+                            if name[^1] == ':':
+                                merge[name.strip(chars = {':'}, leading = false)] = value
 
-                    for name, value in this.getAttrs(node).pairs:
-                        this.scope[name] = value
+                    if path != "":
+                        let
+                            tmpl = this.engine.loadFile("resources/tags/" & path & ".html")
 
-                    for child in tmpl.root:
-                        this.add(head, child, parent)
+                        this.beginScope((context: this.context))
 
-                    this.closeScope()
+                        for name, value in this.getAttrs(node).pairs:
+                            this.scope[name] = value
+
+                        for child in tmpl.root:
+                            this.add(head, child, parent, merge)
+
+                        this.closeScope()
+                    else:
+                        for child in node:
+                            this.add(head, child, parent, merge)
                 else:
                     let
                         clone = this.clone(node)
-
+                    for name, value in merge.pairs:
+                        if clone.attrs.contains(name):
+                            clone.attrs[name] = clone.attrs[name] & " " & this.fill(value)
+                        else:
+                            clone.attrs[name] = this.fill(value)
                     for child in node:
                         this.add(clone, child, node)
                     head.add(clone)
+
             of xnText, xnVerbatimText:
                 if node.text.strip == "":
                     head.add(node)
