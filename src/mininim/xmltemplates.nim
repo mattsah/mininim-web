@@ -311,7 +311,12 @@ begin XmlTemplate:
                     if node.attrs != nil:
                         for name, value in node.attrs:
                             if name[^1] == ':':
-                                merge[name.strip(chars = {':'}, leading = false)] = value
+                                let
+                                    baseName = name.strip(chars = {':'}, leading = false)
+                                if merge.contains(baseName):
+                                    merge[baseName] = merge[baseName] & " " & value
+                                else:
+                                    merge[baseName] = value
 
                     if path != "":
                         var
