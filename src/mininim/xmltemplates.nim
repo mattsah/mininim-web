@@ -224,7 +224,7 @@ begin XmlTemplate:
         result = ()
 
         for i in 0..this.data.high:
-            for name, value in this.data[i].pairs:
+            for name, value in this.data[i]:
                 result[name] = value
 
     method scope*(): dyn {. base .} =
@@ -266,9 +266,9 @@ begin XmlTemplate:
 
     method getAttrs*(node: XmlNode, ours: seq[string] = @[]): Table[string, dyn] {. base .} =
         if node.attrsLen > 0:
-            for key, value in node.attrs.pairs:
+            for name, value in node.attrs:
                 let
-                    parts = key.split(':')
+                    parts = name.split(':')
 
                 if this.mode[^1] != XmlRaw and parts.len > 1 and (ours.len == 0 or parts[0] in ours):
                     if parts.len >= 2 and parts[^1] == "":
@@ -276,21 +276,21 @@ begin XmlTemplate:
                         discard
                     else:
                         let
-                            key = parts[0]
+                            name = parts[0]
 
-                        result[key] = value
+                        result[name] = value
 
                         for i in 1..parts.high:
-                            result[key] = this.engine.filter(this, parts[i], result[key])
+                            result[name] = this.engine.filter(this, parts[i], result[name])
                 else:
-                    result[key] = this.fill(value)
+                    result[name] = this.fill(value)
 
 
     method clone*(node: XmlNode): XmlNode {. base .} =
         result = newXmlTree(node.tag, [], toXmlAttributes())
 
         if node.attrs != nil:
-            for name, value in node.attrs.pairs:
+            for name, value in node.attrs:
                 result.attrs[name] = this.fill(value)
 
     method add*(head, node, parent: XmlNode, merge = newTable[string, string]()): void {. base .} =
@@ -309,17 +309,25 @@ begin XmlTemplate:
                         path = parts[1..^1].join("/").strip(chars = {'/'}, leading = false)
 
                     if node.attrs != nil:
-                        for name, value in node.attrs.pairs:
+                        for name, value in node.attrs:
                             if name[^1] == ':':
                                 merge[name.strip(chars = {':'}, leading = false)] = value
 
                     if path != "":
+                        var
+                            children = ~[]
                         let
                             tmpl = this.engine.loadFile("resources/tags/" & path & ".html")
 
-                        this.beginScope((context: this.context))
+                        for child in node:
+                            if child.kind == xnText and child.text.strip() == "":
+                                continue
+                            else:
+                                children << $child
 
-                        for name, value in this.getAttrs(node).pairs:
+                        this.beginScope((context: this.context, children: children))
+
+                        for name, value in this.getAttrs(node):
                             this.scope[name] = value
 
                         for child in tmpl.root:
@@ -332,7 +340,7 @@ begin XmlTemplate:
                 else:
                     let
                         clone = this.clone(node)
-                    for name, value in merge.pairs:
+                    for name, value in merge:
                         if clone.attrs.contains(name):
                             clone.attrs[name] = clone.attrs[name] & " " & this.fill(value)
                         else:
