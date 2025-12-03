@@ -556,7 +556,7 @@ shape XmlEngine: @[
 converter toResponse*(tmpl: XmlTemplate): Response =
     result = Response(
         status: HttpCode(200),
-        stream: newStringStream(tmpl.render()),
+        stream: newStringStream("<!doctype html>\n" & tmpl.render()),
         headers: HttpHeaders(@[
             ("Content-Type", "text/html; ustf-8")
         ])
