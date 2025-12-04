@@ -58,6 +58,7 @@ begin XmlNode:
                 result = (
                     kind: case this.kind:
                         of xnText, xnVerbatimText: "text"
+                        of xnEntity: "entity"
                         else: "unknown",
                     text: this.text
                 )
@@ -76,8 +77,10 @@ begin XmlNode:
                         for child in this.children:
                             result = result & child
                         result = result & "</" & this.name & ">"
+                elif this.kind == "entity":
+                    result = "&" & this.text & ";"
                 else:
-                    result = xmltree.escape(this.text)
+                    result = this.text
         )
 
     method escape*(): string {. base .} =
@@ -90,6 +93,14 @@ begin XmlNode:
                 break
 
     method fix(): void {. base .} =
+        const
+            badEntities = @[
+                ("<", "lt"),
+                (">", "gt"),
+                ("'", "apos"),
+                ("\"", "quot")
+            ].toTable()
+
         var
             i = -1
             l = this.len
@@ -100,18 +111,15 @@ begin XmlNode:
                 of xnElement:
                     this[i].fix()
                 of xnText:
+                    if this[i].text.len == 1:
+                        if badEntities.hasKey(this[i].text):
+                            this.replace(i, [newEntity(badEntities[this[i].text])])
+                            continue
+
                     if i > 0:
                         if this[i-1].kind == xnText:
                             this[i].text = this[i-1].text & this[i].text
                             this.delete(i-1)
-                            dec i
-                            dec l
-                            continue
-
-                    if i+1 < l:
-                        if this[i+1].kind == xnText:
-                            this[i+1].text = this[i].text & this[i+1].text
-                            this.delete(i)
                             dec i
                             dec l
                             continue
@@ -540,7 +548,7 @@ shape XmlEngine: @[
             block:
                 for child in node:
                     let
-                        plate = tmpl.engine.loadString(tmpl.fill($child))
+                        plate = tmpl.engine.loadString(tmpl.fill($(~child)))
                         tree = plate.process((), XmlRaw)
 
                     for subchild in tree:
@@ -553,7 +561,7 @@ shape XmlEngine: @[
             block:
                 for child in node:
                     let
-                        plate = tmpl.engine.loadString(tmpl.fill($child))
+                        plate = tmpl.engine.loadString(tmpl.fill($(~child)))
                         tree = plate.process(copy tmpl.scope)
 
                     for subchild in tree:
