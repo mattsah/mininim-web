@@ -17,7 +17,6 @@ type
     XmlMode* = enum
         XmlRaw
         XmlEsc
-        XmlSec
 
     XmlTemplate* = ref object of Class
         root: XmlNode
@@ -42,11 +41,82 @@ type
         attrfilters: TableRef[string, AttrFilterHook]
 
 begin XmlNode:
+    converter asDyn(): dyn =
+        case this.kind:
+            of xnElement:
+                result = (
+                    kind: "element",
+                    name: this.tag,
+                    children: this.mapIt(asDyn(it)),
+                    attrs: ~()
+                )
+
+                if this.attrsLen > 0:
+                    for name, value in this.attrs:
+                        result.attrs[name] = value
+            else:
+                result = (
+                    kind: case this.kind:
+                        of xnText, xnVerbatimText: "text"
+                        else: "unknown",
+                    text: this.text
+                )
+
+        result.toString = dynToString as (
+            block:
+                if this.kind == "element":
+                    result = "<" & this.name
+                    if this.attrs.len > 0:
+                        for name, value in this.attrs:
+                            result = result & " " & name & "=\"" & value & "\""
+                    if this.children.len == 0:
+                        result = result & " />"
+                    else:
+                        result = result & ">"
+                        for child in this.children:
+                            result = result & child
+                        result = result & "</" & this.name & ">"
+                else:
+                    result = xmltree.escape(this.text)
+        )
+
+    method escape*(): string {. base .} =
+        result = xmltree.escape($this)
+
     method delete*(child: XmlNode): void {. base .} =
         for i in 0..<this.len:
             if child == this[i]:
                 this.delete(i)
                 break
+
+    method fix(): void {. base .} =
+        var
+            i = -1
+            l = this.len
+
+        while i + 1 < l:
+            inc i
+            case this[i].kind:
+                of xnElement:
+                    this[i].fix()
+                of xnText:
+                    if i > 0:
+                        if this[i-1].kind == xnText:
+                            this[i].text = this[i-1].text & this[i].text
+                            this.delete(i-1)
+                            dec i
+                            dec l
+                            continue
+
+                    if i+1 < l:
+                        if this[i+1].kind == xnText:
+                            this[i+1].text = this[i].text & this[i+1].text
+                            this.delete(i)
+                            dec i
+                            dec l
+                            continue
+                else:
+                    discard
 
     method min(): XmlNode {. base .} =
         const
@@ -176,6 +246,8 @@ begin XmlEngine:
                     })
                 )
 
+                result.root.fix()
+
                 if data != nil:
                     result.data.add(data)
 
@@ -211,6 +283,13 @@ begin XmlEngine:
         this.attrFilters[name] = hook
 
 begin XmlTemplate:
+    method context*(): dyn {. base .} =
+        result = ()
+
+        for i in 0..this.data.high:
+            for name, value in this.data[i]:
+                result[name] = value
+
     method scope(index: var int): dyn {. base .} =
         if index < 0:
             index = this.data.high + index
@@ -219,13 +298,6 @@ begin XmlTemplate:
             raise newException(ValueError, fmt "Failed reading scope @ index {$index}, not available")
 
         result = this.data[index]
-
-    method context*(): dyn {. base .} =
-        result = ()
-
-        for i in 0..this.data.high:
-            for name, value in this.data[i]:
-                result[name] = value
 
     method scope*(): dyn {. base .} =
         var
@@ -237,20 +309,20 @@ begin XmlTemplate:
 
         result = this.scope(current)
 
-    method closeScope*(): void {. base .} =
-        discard this.data.pop()
-
     method beginScope*(scope: dyn = null) {. base .} =
         if scope == null:
             this.data.add(copy this.scope)
         else:
             this.data.add(scope)
 
-    method closeMode*(): void {. base .} =
-        discard this.mode.pop()
+    method closeScope*(): void {. base .} =
+        discard this.data.pop()
 
     method beginMode*(mode: XmlMode) {. base .} =
         this.mode.add(mode)
+
+    method closeMode*(): void {. base .} =
+        discard this.mode.pop()
 
     method eval*(value: dyn): dyn {. base .} =
         if this.mode[^1] == XmlRaw:
@@ -264,7 +336,24 @@ begin XmlTemplate:
         else:
             result = Script.fill(value, this.scope)
 
-    method getAttrs*(node: XmlNode, ours: seq[string] = @[]): Table[string, dyn] {. base .} =
+    method clone*(node: XmlNode, deep: bool = false): XmlNode {. base .} =
+        case node.kind:
+            of xnElement:
+                result = newXmlTree(node.tag, [], toXmlAttributes())
+
+                if node.attrs != nil:
+                    for name, value in node.attrs:
+                        result.attrs[name] = this.fill(value)
+
+                if deep:
+                    for child in node:
+                        result.add(this.clone(child, true))
+            of xnText:
+                result = newText(this.fill(node.text))
+            else:
+                result = deepcopy node
+
+    method attrs*(node: XmlNode, ours: seq[string] = @[]): Table[string, dyn] {. base .} =
         if node.attrsLen > 0:
             for name, value in node.attrs:
                 let
@@ -284,14 +373,6 @@ begin XmlTemplate:
                             result[name] = this.engine.filter(this, parts[i], result[name])
                 else:
                     result[name] = this.fill(value)
-
-
-    method clone*(node: XmlNode): XmlNode {. base .} =
-        result = newXmlTree(node.tag, [], toXmlAttributes())
-
-        if node.attrs != nil:
-            for name, value in node.attrs:
-                result.attrs[name] = this.fill(value)
 
     method add*(head, node, parent: XmlNode, merge = newTable[string, string]()): void {. base .} =
         case node.kind:
@@ -325,14 +406,14 @@ begin XmlTemplate:
                             tmpl = this.engine.loadFile("resources/tags/" & path & ".html")
 
                         for child in node:
-                            if child.kind == xnText and child.text.strip() == "":
+                            if child.kind in [xnText, xnVerbatimText] and child.text.strip() == "":
                                 continue
                             else:
-                                children << $child
+                                children << child
 
                         this.beginScope((context: this.context, children: children))
 
-                        for name, value in this.getAttrs(node):
+                        for name, value in this.attrs(node):
                             this.scope[name] = value
 
                         for child in tmpl.root:
@@ -345,28 +426,20 @@ begin XmlTemplate:
                 else:
                     let
                         clone = this.clone(node)
+
                     for name, value in merge:
                         if clone.attrs.contains(name):
                             clone.attrs[name] = clone.attrs[name] & " " & this.fill(value)
                         else:
                             clone.attrs[name] = this.fill(value)
+
                     for child in node:
                         this.add(clone, child, node)
+
                     head.add(clone)
 
-            of xnText, xnVerbatimText:
-                if node.text.strip == "":
-                    head.add(node)
-                else:
-                    case this.mode[^1]:
-                        of XmlRaw:
-                            head.add(node)
-                        of XmlEsc:
-                            head.add(newText(this.fill(node.text)))
-                        of XmlSec:
-                            head.add(newVerbatimText(this.fill(node.text)))
             else:
-                discard
+                head.add(this.clone(node))
 
     method process*(data: dyn = nil, mode: XmlMode = XmlEsc): XmlNode {. base .} =
         this.mode.add(mode)
@@ -386,9 +459,6 @@ begin XmlTemplate:
             else:
                 result.add(child.min(), 0, 0, false)
 
-    #[
-
-    ]#
     method set*(name: string, value: dyn): void {. base .} =
         this.scope[name] = value
 
@@ -428,19 +498,40 @@ shape XmlEngine: @[
         name: "script",
         call: ElementHook as (
             block:
-                tmpl.beginMode(XmlSec)
-
                 let
                     script = tmpl.clone(node)
 
                 if node.len == 0:
-                    tmpl.add(script, newText(""), parent)
+                    tmpl.add(script, newVerbatimText(""), parent)
                 else:
                     for child in node:
-                        tmpl.add(script, child, parent)
+                        case child.kind:
+                            of xnElement:
+                                # If the child is an element, we move to raw mode and treat its rendered
+                                # content as a verbatim string.  Note, raw mode prevents rendering {{ }} in
+                                # the deep clone -- it is assumed HTML inside a script is being rendered
+                                # independently if required
+                                tmpl.beginMode(XmlRaw)
+                                script.add(newVerbatimText($tmpl.clone(child, true)))
+                                tmpl.closeMode()
+                            else:
+                                # If the child is anything else, we convert its text to a verbatim string
+                                # but we do not use raw mode to enable rendering of {{ }}. and having values
+                                # to be inject in scripts.  Note, that this implies XSS is always possible
+                                # in the context of a <script> tag.
+                                script.add(newVerbatimText(tmpl.fill(child.text)))
 
-                tmpl.closeMode()
                 head.add(script)
+        )
+    ),
+    XmlElement(
+        name: "esc",
+        call: ElementHook as(
+            block:
+                for child in node:
+                    tmpl.beginMode(XmlRaw)
+                    head.add(newText($tmpl.clone(child, true)))
+                    tmpl.closeMode()
         )
     ),
     XmlElement(
@@ -473,7 +564,7 @@ shape XmlEngine: @[
         name: "set",
         call: ElementHook as (
             block:
-                for key, value in tmpl.getAttrs(node):
+                for key, value in tmpl.attrs(node):
                     tmpl.set(key, value)
         )
     ),
@@ -482,7 +573,7 @@ shape XmlEngine: @[
         call: ElementHook as (
             block:
                 let
-                    attrs  = tmpl.getAttrs(node, @["name"])
+                    attrs  = tmpl.attrs(node, @["name"])
                 if not attrs.hasKey("name"):
                     raise newException(ValueError, "The `val` tag must provide a `name` attribute")
 
@@ -494,7 +585,7 @@ shape XmlEngine: @[
         call: ElementHook as (
             block:
                 let
-                    attrs  = tmpl.getAttrs(node, @["if"])
+                    attrs  = tmpl.attrs(node, @["if"])
                 if not attrs.hasKey("if"):
                     raise newException(ValueError, "The `do` tag outside a `try` must provide an `if` attribute")
                 if attrs["if"]:
@@ -513,7 +604,7 @@ shape XmlEngine: @[
                 for child in node:
                     if child.kind == xnElement:
                         let
-                            attrs = tmpl.getAttrs(child, @["if"])
+                            attrs = tmpl.attrs(child, @["if"])
                         if not attrs.hasKey("if") or attrs["if"]:
                             for dochild in child:
                                 tmpl.add(head, dochild, parent)
@@ -526,7 +617,7 @@ shape XmlEngine: @[
         call: ElementHook as (
             block:
                 let
-                    attrs  = tmpl.getAttrs(node, @["key", "val", "in"])
+                    attrs  = tmpl.attrs(node, @["key", "val", "in"])
                     valSet = attrs.hasKey("val")
                     keySet = attrs.hasKey("key")
 
