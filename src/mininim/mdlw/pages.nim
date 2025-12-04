@@ -1,7 +1,7 @@
 import
     mininim,
     mininim/web,
-    mininim/xmltemplates,
+    mininim/templates,
     parsetoml,
     nre
 
@@ -89,7 +89,7 @@ begin Pages:
             tryTemplate = path.splitPath.head & "/" & sym & path.splitPath.tail & ".html"
 
         if os.fileExists(tryTemplate):
-            return this.app.get(XmlEngine).loadFile(tryTemplate);
+            return this.app.get(TemplateEngine).loadFile(tryTemplate);
 
         if os.fileExists(altTemplate):
             var

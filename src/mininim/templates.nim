@@ -4,8 +4,7 @@ import
     mininim/script,
     mininim/web/router,
     checksums/md5,
-    std/xmlparser,
-    std/parsexml,
+    std/htmlparser,
     std/xmltree,
     std/streams,
     std/strtabs
@@ -14,28 +13,28 @@ export
     xmltree
 
 type
-    XmlMode* = enum
+    TemplateMode* = enum
         XmlRaw
         XmlEsc
 
-    XmlTemplate* = ref object of Class
+    Template* = ref object of Class
         root: XmlNode
-        mode: seq[XmlMode]
+        mode: seq[TemplateMode]
         data: seq[dyn] = @[]
         tree: XmlNode = newXmlTree("x", [])
-        engine*: XmlEngine
+        engine*: TemplateEngine
 
-    ElementHook* = proc(tmpl: XmlTemplate, head: XmlNode, node: XmlNode, parent: XmlNode): void
+    ElementHook* = proc(tmpl: Template, head: XmlNode, node: XmlNode, parent: XmlNode): void
 
-    XmlElement* = ref object of Facet
+    Element* = ref object of Facet
         name*: string
 
-    AttrFilterHook* = proc(tmpl: XmlTemplate, value: dyn): dyn
+    AttrFilterHook* = proc(tmpl: Template, value: dyn): dyn
 
-    XmlAttrFilter* = ref object of Facet
+    AttrFilter* = ref object of Facet
         name*: string
 
-    XmlEngine* = ref object of Class
+    TemplateEngine* = ref object of Class
         tmplCache: TableRef[string, XmlNode]
         elements: TableRef[string, ElementHook]
         attrfilters: TableRef[string, AttrFilterHook]
@@ -111,6 +110,9 @@ begin XmlNode:
                 of xnElement:
                     this[i].fix()
                 of xnText:
+                    if this.tag == "script":
+                        continue
+
                     if this[i].text.len == 1:
                         if badEntities.hasKey(this[i].text):
                             this.replace(i, [newEntity(badEntities[this[i].text])])
@@ -208,24 +210,24 @@ begin XmlNode:
                         dec i
                         dec l
 
-begin XmlEngine:
+begin TemplateEngine:
     proc init*(): void =
         this.tmplCache = newTable[string, XmlNode]()
         this.elements = newTable[string, ElementHook]()
         this.attrFilters = newTable[string, AttrFilterHook]()
 
-    method filter*(tmpl: XmlTemplate, name: string, value: dyn): dyn {. base .} =
+    method filter*(tmpl: Template, name: string, value: dyn): dyn {. base .} =
         if not this.attrFilters.hasKey(name):
             raise newException(ValueError, fmt "Unknown filter '{name}'")
 
         result = this.attrFilters[name](tmpl, value)
 
-    method load(loader: proc(): XmlTemplate, hash: string, data: dyn = nil): XmlTemplate {. base .} =
+    method load(loader: proc(): Template, hash: string, data: dyn = nil): Template {. base .} =
         if this.tmplCache.contains(hash):
             when defined debug:
                 echo fmt "Loading template [{hash}] from cache"
 
-            result = XmlTemplate(
+            result = Template(
                 engine: this,
                 root: this.tmplCache[hash]
             )
@@ -239,19 +241,15 @@ begin XmlEngine:
             result = loader()
             this.tmplCache[hash] = result.root
 
-    method loadString*(content: string, data: dyn = nil): XmlTemplate {. base .} =
+    method loadString*(content: string, data: dyn = nil): Template {. base .} =
         let
-            loader = proc(): XmlTemplate =
+            loader = proc(): Template =
                 let
                     stream = newStringStream("<x>" & content.strip & "</x>")
 
-                result = XmlTemplate(
+                result = Template(
                     engine: this,
-                    root: parseXml(stream, {
-                        allowEmptyAttribs,
-                        allowUnquotedAttribs,
-                        reportWhitespace
-                    })
+                    root: parseHtml(stream)
                 )
 
                 result.root.fix()
@@ -267,9 +265,9 @@ begin XmlEngine:
             result = loader()
 
 
-    method loadFile*(filename: string, data: dyn = nil): XmlTemplate {. base .} =
+    method loadFile*(filename: string, data: dyn = nil): Template {. base .} =
         let
-            loader = proc(): XmlTemplate =
+            loader = proc(): Template =
                 let
                     stream = newFileStream(filename, fmRead)
 
@@ -290,7 +288,7 @@ begin XmlEngine:
     method withAttrFilter*(name: string, hook: AttrFilterHook): void {. base .} =
         this.attrFilters[name] = hook
 
-begin XmlTemplate:
+begin Template:
     method context*(): dyn {. base .} =
         result = ()
 
@@ -326,7 +324,7 @@ begin XmlTemplate:
     method closeScope*(): void {. base .} =
         discard this.data.pop()
 
-    method beginMode*(mode: XmlMode) {. base .} =
+    method beginMode*(mode: TemplateMode) {. base .} =
         this.mode.add(mode)
 
     method closeMode*(): void {. base .} =
@@ -449,7 +447,7 @@ begin XmlTemplate:
             else:
                 head.add(this.clone(node))
 
-    method process*(data: dyn = nil, mode: XmlMode = XmlEsc): XmlNode {. base .} =
+    method process*(data: dyn = nil, mode: TemplateMode = XmlEsc): XmlNode {. base .} =
         this.mode.add(mode)
 
         if data != nil:
@@ -460,7 +458,7 @@ begin XmlTemplate:
 
         result = this.tree
 
-    method render*(data: dyn = nil, mode: XmlMode = XmlEsc): string {. base .} =
+    method render*(data: dyn = nil, mode: TemplateMode = XmlEsc): string {. base .} =
         for child in this.process(data, mode):
             when defined debug:
                 result.add(child.min(), 0, 4, true)
@@ -473,36 +471,36 @@ begin XmlTemplate:
     method put*(name: string, value: string): void {. base .} =
         this.scope[name] = Script.eval(value, this.scope)
 
-shape XmlEngine: @[
+shape TemplateEngine: @[
     Shared(),
     Delegate(
         call: DelegateHook as (
             block:
                 result = shape.init()
 
-                for element in this.app.config.findAll(XmlElement):
+                for element in this.app.config.findAll(Element):
                     result.withElement(element.name, element[ElementHook])
 
-                for filter in this.app.config.findAll(XmlAttrFilter):
+                for filter in this.app.config.findAll(AttrFilter):
                     result.withAttrFilter(filter.name, filter[AttrFilterHook])
 
         )
     ),
-    XmlAttrFilter(
+    AttrFilter(
         name: "val",
         call: AttrFilterHook as (
             block:
                 result = tmpl.eval(value)
         )
     ),
-    XmlAttrFilter(
+    AttrFilter(
         name: "raw",
         call: AttrFilterHook as (
             block:
                 result = value
         )
     ),
-    XmlElement(
+    Element(
         name: "script",
         call: ElementHook as (
             block:
@@ -512,6 +510,9 @@ shape XmlEngine: @[
                 if node.len == 0:
                     tmpl.add(script, newVerbatimText(""), parent)
                 else:
+                    let
+                        content = newVerbatimText("")
+
                     for child in node:
                         case child.kind:
                             of xnElement:
@@ -520,19 +521,21 @@ shape XmlEngine: @[
                                 # the deep clone -- it is assumed HTML inside a script is being rendered
                                 # independently if required
                                 tmpl.beginMode(XmlRaw)
-                                script.add(newVerbatimText($tmpl.clone(child, true)))
+                                content.text = content.text & $tmpl.clone(child, true)
                                 tmpl.closeMode()
                             else:
                                 # If the child is anything else, we convert its text to a verbatim string
                                 # but we do not use raw mode to enable rendering of {{ }}. and having values
                                 # to be inject in scripts.  Note, that this implies XSS is always possible
                                 # in the context of a <script> tag.
-                                script.add(newVerbatimText(tmpl.fill(child.text)))
+                                content.text = content.text & tmpl.fill($(~child))
+
+                    script.add(content)
 
                 head.add(script)
         )
     ),
-    XmlElement(
+    Element(
         name: "esc",
         call: ElementHook as(
             block:
@@ -542,7 +545,7 @@ shape XmlEngine: @[
                     tmpl.closeMode()
         )
     ),
-    XmlElement(
+    Element(
         name: "raw",
         call: ElementHook as (
             block:
@@ -555,7 +558,7 @@ shape XmlEngine: @[
                         head.add(subchild)
         )
     ),
-    XmlElement(
+    Element(
         name: "mix",
         call: ElementHook as (
             block:
@@ -568,7 +571,7 @@ shape XmlEngine: @[
                         head.add(subchild)
         )
     ),
-    XmlElement(
+    Element(
         name: "set",
         call: ElementHook as (
             block:
@@ -576,7 +579,7 @@ shape XmlEngine: @[
                     tmpl.set(key, value)
         )
     ),
-    XmlElement(
+    Element(
         name: "val",
         call: ElementHook as (
             block:
@@ -588,7 +591,7 @@ shape XmlEngine: @[
                 tmpl.put(attrs["name"], node.innerText)
         )
     ),
-    XmlElement(
+    Element(
         name: "do",
         call: ElementHook as (
             block:
@@ -601,7 +604,7 @@ shape XmlEngine: @[
                         tmpl.add(head, child, parent)
         )
     ),
-    XmlElement(
+    Element(
         name: "try",
         call: ElementHook as (
             block:
@@ -620,7 +623,7 @@ shape XmlEngine: @[
         )
 
     ),
-    XmlElement(
+    Element(
         name: "for",
         call: ElementHook as (
             block:
@@ -652,7 +655,7 @@ shape XmlEngine: @[
     ),
 ]
 
-converter toResponse*(tmpl: XmlTemplate): Response =
+converter toResponse*(tmpl: Template): Response =
     result = Response(
         status: HttpCode(200),
         stream: newStringStream("<!doctype html>\n" & tmpl.render()),
@@ -662,8 +665,8 @@ converter toResponse*(tmpl: XmlTemplate): Response =
     )
 
 begin Action:
-    method xmlengine: XmlEngine {. base .} =
-        result = this.app.get(XmlEngine)
+    method templates: TemplateEngine {. base .} =
+        result = this.app.get(TemplateEngine)
 
-    method html*(file: string, data: dyn = ()): XmlTemplate {. base .} =
-        result = this.xmlengine.loadFile(file, data)
+    method html*(file: string, data: dyn = ()): Template {. base .} =
+        result = this.templates.loadFile(file, data)

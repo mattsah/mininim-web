@@ -129,7 +129,7 @@ begin HttpServer:
                             HttpHeaders(@[
                                 ("Content-Type", "text/plain; utf-8")
                             ]),
-                            getCurrentExceptionMsg()
+                            getCurrentExceptionMsg() & " : " & $getCurrentException().trace
                         )
             )
 
