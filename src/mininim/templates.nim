@@ -408,6 +408,7 @@ begin Template:
                     if path != "":
                         var
                             children = ~[]
+                            scope = ~()
                         let
                             tmpl = this.engine.loadFile("resources/tags/" & path & ".html")
 
@@ -417,10 +418,13 @@ begin Template:
                             else:
                                 children << child
 
-                        this.beginScope((context: this.context, children: children))
-
                         for name, value in this.attrs(node):
-                            this.scope[name] = value
+                            scope[name] = value
+
+                        scope.context = this.context
+                        scope.children = children
+
+                        this.beginScope(scope)
 
                         for child in tmpl.root:
                             this.add(head, child, parent, merge)
