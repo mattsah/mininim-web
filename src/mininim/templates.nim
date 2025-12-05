@@ -521,7 +521,7 @@ shape TemplateEngine: @[
                                 # the deep clone -- it is assumed HTML inside a script is being rendered
                                 # independently if required
                                 tmpl.beginMode(XmlRaw)
-                                content.text = content.text & $tmpl.clone(child, true)
+                                content.text = content.text & $(~child)
                                 tmpl.closeMode()
                             else:
                                 # If the child is anything else, we convert its text to a verbatim string
