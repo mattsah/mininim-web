@@ -35,19 +35,52 @@ type
         name*: string
 
     TemplateEngine* = ref object of Class
-        tmplCache: TableRef[string, XmlNode]
         elements: TableRef[string, ElementHook]
         attrfilters: TableRef[string, AttrFilterHook]
 
+    DynCache = object
+        items = newTable[int, dyn]()
+        lock: Lock
+
+    TemplateCache = object
+        items = newTable[string, XmlNode]()
+        lock: Lock
+
+var
+    ueid = 0
+    dynCache = DynCache()
+    tmplCache = TemplateCache()
+
+initLock(dynCache.lock)
+initLock(tmplCache.lock)
+
 begin XmlNode:
     converter asDyn(): dyn =
+        proc toString(this: dyn): string {. static, noauto .} =
+            if this.kind == "element":
+                result = "<" & this.name
+                if this.attrs.len > 0:
+                    for name, value in this.attrs:
+                        result = result & " " & name & "=\"" & value & "\""
+                if this.children.len == 0:
+                    result = result & " />"
+                else:
+                    result = result & ">"
+                    for child in this.children:
+                        result = result & child
+                    result = result & "</" & this.name & ">"
+            elif this.kind == "entity":
+                result = "&" & this.text & ";"
+            else:
+                result = this.text
+
         case this.kind:
             of xnElement:
                 result = (
                     kind: "element",
                     name: this.tag,
                     children: this.mapIt(asDyn(it)),
-                    attrs: ~()
+                    attrs: ()
                 )
 
                 if this.attrsLen > 0:
@@ -62,25 +95,7 @@ begin XmlNode:
                     text: this.text
                 )
 
-        result.toString = dynToString as (
-            block:
-                if this.kind == "element":
-                    result = "<" & this.name
-                    if this.attrs.len > 0:
-                        for name, value in this.attrs:
-                            result = result & " " & name & "=\"" & value & "\""
-                    if this.children.len == 0:
-                        result = result & " />"
-                    else:
-                        result = result & ">"
-                        for child in this.children:
-                            result = result & child
-                        result = result & "</" & this.name & ">"
-                elif this.kind == "entity":
-                    result = "&" & this.text & ";"
-                else:
-                    result = this.text
-        )
+        result.toString = toString
 
     method escape*(): string {. base .} =
         result = xmltree.escape($this)
@@ -106,11 +121,17 @@ begin XmlNode:
 
         while i + 1 < l:
             inc i
+            this[i].clientData = ueid
+            inc ueid
+
             case this[i].kind:
                 of xnElement:
                     this[i].fix()
+
                 of xnText:
                     if this.tag == "script":
+                        # script wants common entities as text and will do its own
+                        # consolidation.
                         continue
 
                     if this[i].text.len == 1:
@@ -212,7 +233,6 @@ begin XmlNode:
 
 begin TemplateEngine:
     proc init*(): void =
-        this.tmplCache = newTable[string, XmlNode]()
         this.elements = newTable[string, ElementHook]()
         this.attrFilters = newTable[string, AttrFilterHook]()
 
@@ -223,13 +243,13 @@ begin TemplateEngine:
         result = this.attrFilters[name](tmpl, value)
 
     method load(loader: proc(): Template, hash: string, data: dyn = nil): Template {. base .} =
-        if this.tmplCache.contains(hash):
+        if tmplCache.items.contains(hash):
             when defined debug:
                 echo fmt "Loading template [{hash}] from cache"
 
             result = Template(
                 engine: this,
-                root: this.tmplCache[hash]
+                root: tmplCache.items[hash]
             )
 
             if data != nil:
@@ -239,7 +259,8 @@ begin TemplateEngine:
                 echo fmt "Storing template [{hash}] to cache"
 
             result = loader()
-            this.tmplCache[hash] = result.root
+            withLock tmplCache.lock:
+                tmplCache.items[hash] = result.root
 
     method loadString*(content: string, data: dyn = nil): Template {. base .} =
         let
@@ -259,7 +280,7 @@ begin TemplateEngine:
 
                 close(stream)
 
-        if this.useCache:
+        if mininim.useCache():
             result = this.load(loader, content.getMD5(), data)
         else:
             result = loader()
@@ -277,7 +298,7 @@ begin TemplateEngine:
                 result = this.loadString(stream.readAll(), data)
                 stream.close()
 
-        if this.useCache:
+        if mininim.useCache():
             result = this.load(loader, filename.getMD5(), data)
         else:
             result = loader()
@@ -416,7 +437,17 @@ begin Template:
                             if child.kind in [xnText, xnVerbatimText] and child.text.strip() == "":
                                 continue
                             else:
-                                children << child
+                                var
+                                    dynChild: dyn
+                                if not dynCache.items.hasKey(child.clientData):
+                                    dynChild = ~child
+                                    if mininim.useCache():
+                                        withLock dynCache.lock:
+                                            dynCache.items[child.clientData] = dynChild
+                                if mininim.useCache():
+                                    dynChild = dynCache.items[child.clientData]
+
+                                children = children + dynChild
 
                         for name, value in this.attrs(node):
                             scope[name] = value
@@ -451,6 +482,25 @@ begin Template:
             else:
                 head.add(this.clone(node))
 
+    method expand*(node: XmlNode): string {.base .} =
+        case node.kind:
+            of xnElement:
+                result = "<" & node.tag
+                if node.attrsLen > 0:
+                    for name, value in node.attrs:
+                        result = result & " " & name & "=\"" & value & "\""
+                if node.len == 0:
+                    result = result & " />"
+                else:
+                    result = result & ">"
+                    for child in node:
+                        result = result & this.expand(child)
+                    result = result & "</" & node.tag & ">"
+            of xnEntity:
+                result = "&" & node.text & ";"
+            else:
+                result = node.text
+
     method process*(data: dyn = nil, mode: TemplateMode = XmlEsc): XmlNode {. base .} =
         this.mode.add(mode)
 
@@ -461,6 +511,7 @@ begin Template:
             this.add(this.tree, child, child)
 
         result = this.tree
+
 
     method render*(data: dyn = nil, mode: TemplateMode = XmlEsc): string {. base .} =
         for child in this.process(data, mode):
@@ -511,31 +562,27 @@ shape TemplateEngine: @[
                 let
                     script = tmpl.clone(node)
 
-                if node.len == 0:
-                    tmpl.add(script, newVerbatimText(""), parent)
-                else:
-                    let
-                        content = newVerbatimText("")
+                let
+                    content = newVerbatimText("")
 
-                    for child in node:
-                        case child.kind:
-                            of xnElement:
-                                # If the child is an element, we move to raw mode and treat its rendered
-                                # content as a verbatim string.  Note, raw mode prevents rendering {{ }} in
-                                # the deep clone -- it is assumed HTML inside a script is being rendered
-                                # independently if required
-                                tmpl.beginMode(XmlRaw)
-                                content.text = content.text & $(~child)
-                                tmpl.closeMode()
-                            else:
-                                # If the child is anything else, we convert its text to a verbatim string
-                                # but we do not use raw mode to enable rendering of {{ }}. and having values
-                                # to be inject in scripts.  Note, that this implies XSS is always possible
-                                # in the context of a <script> tag.
-                                content.text = content.text & tmpl.fill($(~child))
+                for child in node:
+                    case child.kind:
+                        of xnElement:
+                            # If the child is an element, we move to raw mode and treat its rendered
+                            # content as a verbatim string.  Note, raw mode prevents rendering {{ }} in
+                            # the deep clone -- it is assumed HTML inside a script is being rendered
+                            # independently if required
+                            tmpl.beginMode(XmlRaw)
+                            content.text = content.text & tmpl.expand(child)
+                            tmpl.closeMode()
+                        else:
+                            # If the child is anything else, we convert its text to a verbatim string
+                            # but we do not use raw mode to enable rendering of {{ }}. and having values
+                            # to be inject in scripts.  Note, that this implies XSS is always possible
+                            # in the context of a <script> tag.
+                            content.text = content.text & tmpl.fill(tmpl.expand(child))
 
-                    script.add(content)
-
+                script.add(content)
                 head.add(script)
         )
     ),
@@ -555,7 +602,7 @@ shape TemplateEngine: @[
             block:
                 for child in node:
                     let
-                        plate = tmpl.engine.loadString(tmpl.fill($(~child)))
+                        plate = tmpl.engine.loadString(tmpl.fill(tmpl.expand(child)))
                         tree = plate.process((), XmlRaw)
 
                     for subchild in tree:
@@ -568,7 +615,7 @@ shape TemplateEngine: @[
             block:
                 for child in node:
                     let
-                        plate = tmpl.engine.loadString(tmpl.fill($(~child)))
+                        plate = tmpl.engine.loadString(tmpl.fill(tmpl.expand(child)))
                         tree = plate.process(copy tmpl.scope)
 
                     for subchild in tree:
