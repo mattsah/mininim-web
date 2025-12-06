@@ -61,7 +61,10 @@ begin XmlNode:
                 result = "<" & this.name
                 if this.attrs.len > 0:
                     for name, value in this.attrs:
-                        result = result & " " & name & "=\"" & value & "\""
+                        if value.len == 0:
+                            result = result & " " & name
+                        else:
+                            result = result & " " & name & "=\"" & value & "\""
                 if this.children.len == 0:
                     result = result & " />"
                 else:
@@ -433,21 +436,24 @@ begin Template:
                         let
                             tmpl = this.engine.loadFile("resources/tags/" & path & ".html")
 
-                        for child in node:
-                            if child.kind in [xnText, xnVerbatimText] and child.text.strip() == "":
-                                continue
-                            else:
-                                var
-                                    dynChild: dyn
-                                if not dynCache.items.hasKey(child.clientData):
-                                    dynChild = ~child
+                        if node.len == 0:
+                            children = null
+                        else:
+                            for child in node:
+                                if child.kind in [xnText, xnVerbatimText] and child.text.strip() == "":
+                                    continue
+                                else:
+                                    var
+                                        dynChild: dyn
+                                    if not dynCache.items.hasKey(child.clientData):
+                                        dynChild = ~child
+                                        if mininim.useCache():
+                                            withLock dynCache.lock:
+                                                dynCache.items[child.clientData] = dynChild
                                     if mininim.useCache():
-                                        withLock dynCache.lock:
-                                            dynCache.items[child.clientData] = dynChild
-                                if mininim.useCache():
-                                    dynChild = dynCache.items[child.clientData]
+                                        dynChild = dynCache.items[child.clientData]
 
-                                children = children + dynChild
+                                    children = children + dynChild
 
                         for name, value in this.attrs(node):
                             scope[name] = value
@@ -488,7 +494,10 @@ begin Template:
                 result = "<" & node.tag
                 if node.attrsLen > 0:
                     for name, value in node.attrs:
-                        result = result & " " & name & "=\"" & value & "\""
+                        if value.len == 0:
+                            result = result & " " & name
+                        else:
+                            result = result & " " & name & "=\"" & value & "\""
                 if node.len == 0:
                     result = result & " />"
                 else:
@@ -571,7 +580,9 @@ shape TemplateEngine: @[
                             # If the child is an element, we move to raw mode and treat its rendered
                             # content as a verbatim string.  Note, raw mode prevents rendering {{ }} in
                             # the deep clone -- it is assumed HTML inside a script is being rendered
-                            # independently if required
+                            # independently if required.  This shouldn't actually happen, as it should
+                            # be up to the htmparser to read content of script tags and give us CData or
+                            # verbatimText natively -- unfortunately, it doesn't.
                             tmpl.beginMode(XmlRaw)
                             content.text = content.text & tmpl.expand(child)
                             tmpl.closeMode()
@@ -580,7 +591,7 @@ shape TemplateEngine: @[
                             # but we do not use raw mode to enable rendering of {{ }}. and having values
                             # to be inject in scripts.  Note, that this implies XSS is always possible
                             # in the context of a <script> tag.
-                            content.text = content.text & tmpl.fill(tmpl.expand(child))
+                            content.text = content.text & tmpl.fill(child.text)
 
                 script.add(content)
                 head.add(script)
