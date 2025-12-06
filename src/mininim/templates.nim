@@ -245,25 +245,25 @@ begin TemplateEngine:
 
         result = this.attrFilters[name](tmpl, value)
 
-    method load(loader: proc(): Template, hash: string, data: dyn = nil): Template {. base .} =
-        if tmplCache.items.contains(hash):
+    method load(loader: proc(): Template, key: string, data: dyn = nil): Template {. base .} =
+        if tmplCache.items.contains(key):
             when defined debug:
-                echo fmt "Loading template [{hash}] from cache"
+                echo fmt "Loading template [{key}] from cache"
 
             result = Template(
                 engine: this,
-                root: tmplCache.items[hash]
+                root: tmplCache.items[key]
             )
 
             if data != nil:
                 result.data.add(data)
         else:
             when defined debug:
-                echo fmt "Storing template [{hash}] to cache"
+                echo fmt "Storing template [{key}] to cache"
 
             result = loader()
             withLock tmplCache.lock:
-                tmplCache.items[hash] = result.root
+                tmplCache.items[key] = result.root
 
     method loadString*(content: string, data: dyn = nil): Template {. base .} =
         let
@@ -302,7 +302,7 @@ begin TemplateEngine:
                 stream.close()
 
         if mininim.useCache():
-            result = this.load(loader, filename.getMD5(), data)
+            result = this.load(loader, filename, data)
         else:
             result = loader()
 
@@ -520,7 +520,6 @@ begin Template:
             this.add(this.tree, child, child)
 
         result = this.tree
-
 
     method render*(data: dyn = nil, mode: TemplateMode = XmlEsc): string {. base .} =
         for child in this.process(data, mode):
