@@ -722,7 +722,7 @@ converter toResponse*(tmpl: Template): Response =
         status: HttpCode(200),
         stream: newStringStream("<!doctype html>\n" & tmpl.render()),
         headers: HttpHeaders(@[
-            ("Content-Type", "text/html; ustf-8")
+            ("Content-Type", "text/html; utf-8")
         ])
     )
 
